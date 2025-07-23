@@ -130,6 +130,45 @@ def is_txt(url: str) -> bool:
     """Prüft, ob eine URL eine Textdatei ist."""
     return url.endswith('.txt') or url.endswith('.md')
 
+def get_expected_embedding_dimensions(model_name: str) -> int:
+    """Gibt die erwarteten Embedding-Dimensionen für ein Vertex AI Modell zurück."""
+    model_dimensions = {
+        "text-multilingual-embedding-002": 768,
+        "gemini-embedding-001": 3072,
+        "text-embedding-005": 768,
+        "text-embedding-004": 768,  # Legacy model
+    }
+    return model_dimensions.get(model_name, 768)  # Default zu 768
+
+def get_embedding_model_info(model_name: str) -> Dict[str, Any]:
+    """Gibt Informationen über ein Vertex AI Embedding-Modell zurück."""
+    model_info = {
+        "text-multilingual-embedding-002": {
+            "dimensions": 768,
+            "description": "Multilingual (768D)",
+            "languages": "Mehrsprachig",
+            "max_tokens": 2048
+        },
+        "gemini-embedding-001": {
+            "dimensions": 3072,
+            "description": "Gemini (3072D)",
+            "languages": "Mehrsprachig + Code",
+            "max_tokens": 2048
+        },
+        "text-embedding-005": {
+            "dimensions": 768,
+            "description": "English + Code (768D)",
+            "languages": "Englisch + Code",
+            "max_tokens": 2048
+        }
+    }
+    return model_info.get(model_name, {
+        "dimensions": 768,
+        "description": f"Unknown model ({model_name})",
+        "languages": "Unknown",
+        "max_tokens": 2048
+    })
+
 def extract_section_info(chunk: str) -> Dict[str, Any]:
     """Extracts headers and stats from a chunk."""
     headers = re.findall(r'^(#+)\s+(.+)$', chunk, re.MULTILINE)
@@ -329,13 +368,24 @@ async def run_ingestion_with_modal(
         # Überspringe Vertex AI wenn Platzhalter-Werte verwendet werden
         if vertex_project_id and vertex_project_id != "your-gcp-project-id":
             try:
-                print("Initializing Vertex AI for embeddings...")
+                # Embedding-Modell konfigurieren (aus Umgebungsvariablen oder Standard)
+                embedding_model = os.environ.get("VERTEX_EMBEDDING_MODEL", "text-multilingual-embedding-002")
+                if hasattr(st, 'secrets') and st.secrets.get("VERTEX_EMBEDDING_MODEL"):
+                    embedding_model = st.secrets.get("VERTEX_EMBEDDING_MODEL")
+                
+                model_info = get_embedding_model_info(embedding_model)
+                expected_dimensions = model_info["dimensions"]
+                
+                print(f"Initializing Vertex AI for embeddings with model: {embedding_model}")
+                print(f"Expected embedding dimensions: {expected_dimensions}")
+                st.info(f"🔧 Verwende Vertex AI Modell: {embedding_model} ({model_info['description']})")
+                
                 init_vertex_ai(project_id=vertex_project_id, location=vertex_location)
                 
                 print(f"Generating embeddings for {len(all_chunks)} chunks...")
                 all_embeddings_vertex = await get_vertex_text_embeddings_batched(
                     texts=all_chunks,
-                    model_name="text-multilingual-embedding-002",
+                    model_name=embedding_model,
                     task_type="RETRIEVAL_DOCUMENT",
                     project_id=vertex_project_id,
                     location=vertex_location
@@ -366,35 +416,88 @@ async def run_ingestion_with_modal(
                 else:
                     all_embeddings = all_embeddings_vertex
                 
-                print(f"Successfully generated {len(all_embeddings)} embeddings")
+                embedding_dim = len(all_embeddings[0]) if all_embeddings else 0
+                print(f"Successfully generated {len(all_embeddings)} embeddings with {embedding_dim} dimensions")
+                
+                # Validiere, dass die Dimensionen korrekt sind
+                if embedding_dim != expected_dimensions:
+                    print(f"WARNING: Expected {expected_dimensions} dimensions but got {embedding_dim}")
+                    st.warning(f"⚠️ Unerwartete Embedding-Dimensionen: Erwartet {expected_dimensions}, erhalten {embedding_dim}")
+                
+                st.success(f"✅ Vertex AI Embeddings generiert: {len(all_embeddings)} Embeddings mit {embedding_dim} Dimensionen")
                 
             except Exception as e:
                 print(f"Vertex AI embedding generation failed: {e}")
-                st.warning(f"⚠️ Vertex AI Embeddings fehlgeschlagen. Verwende ChromaDB Standard-Embeddings.")
+                st.warning(f"⚠️ Vertex AI Embeddings fehlgeschlagen: {str(e)}")
+                st.info("🔄 Verwende ChromaDB Standard-Embeddings (384 Dimensionen)")
                 all_embeddings = None  # ChromaDB wird Standard-Embeddings verwenden
         else:
             print("No valid Vertex AI configuration found, using ChromaDB default embeddings")
-            st.info("ℹ️ Verwende ChromaDB Standard-Embeddings (keine Google Cloud Konfiguration)")
+            st.info("ℹ️ Verwende ChromaDB Standard-Embeddings (384 Dimensionen) - keine Google Cloud Konfiguration")
         
         # Schritt 5: In ChromaDB speichern
         if progress:
             progress.update(5, f"Speichere {len(all_chunks)} Chunks in ChromaDB...")
         
-        # Collection erstellen oder laden mit Embedding-Funktion
+        # Collection erstellen oder laden mit korrekter Embedding-Funktion
         from chromadb.utils import embedding_functions
         
-        # Verwende Standard-Embedding-Funktion wenn keine Vertex AI Embeddings verfügbar
+        # Bestimme die richtige Embedding-Funktion basierend auf verfügbaren Embeddings
         embedding_function = None
         if all_embeddings is None:
-            # Verwende ChromaDB's Standard-Embedding-Funktion
+            # Verwende ChromaDB's Standard-Embedding-Funktion (384 Dimensionen)
             embedding_function = embedding_functions.DefaultEmbeddingFunction()
-            print("Using ChromaDB default embedding function")
+            print("Using ChromaDB default embedding function (384 dimensions)")
+        else:
+            # Wenn Vertex AI Embeddings verfügbar sind (768 Dimensionen), verwende keine Embedding-Funktion
+            # ChromaDB wird die bereitgestellten Embeddings direkt verwenden
+            embedding_function = None
+            print(f"Using provided Vertex AI embeddings ({len(all_embeddings[0])} dimensions)")
         
-        collection = get_or_create_collection(
-            client=chroma_client,
-            collection_name=collection_name,
-            embedding_function=embedding_function
-        )
+        # Versuche Collection zu erstellen/laden, bei Dimensionen-Konflikt neu erstellen
+        from utils import check_embedding_compatibility
+        
+        collection = None
+        try:
+            collection = get_or_create_collection(
+                client=chroma_client,
+                collection_name=collection_name,
+                embedding_function=embedding_function
+            )
+            
+            # Prüfe Embedding-Kompatibilität
+            test_embedding = all_embeddings[0] if all_embeddings else None
+            compatibility = check_embedding_compatibility(collection, test_embedding)
+            
+            if not compatibility["compatible"]:
+                print(f"Embedding dimension incompatibility detected: {compatibility['reason']}")
+                st.warning(f"⚠️ Embedding-Dimensionen-Konflikt: {compatibility['reason']}")
+                raise ValueError(f"Dimension conflict: {compatibility['reason']}")
+            else:
+                print(f"Collection compatibility check passed: {compatibility['reason']}")
+                
+        except Exception as e:
+            if "dimension" in str(e).lower() or "Dimension conflict" in str(e):
+                print(f"Embedding dimension conflict detected: {e}")
+                st.warning(f"⚠️ Embedding-Dimensionen-Konflikt erkannt. Erstelle Collection neu...")
+                
+                # Collection löschen und neu erstellen
+                try:
+                    chroma_client.delete_collection(name=collection_name)
+                    print(f"Deleted existing collection '{collection_name}' due to dimension conflict")
+                except Exception as delete_error:
+                    print(f"Could not delete collection (may not exist): {delete_error}")
+                
+                # Neue Collection mit korrekter Embedding-Funktion erstellen
+                collection = get_or_create_collection(
+                    client=chroma_client,
+                    collection_name=collection_name,
+                    embedding_function=embedding_function
+                )
+                print(f"Created new collection '{collection_name}' with correct embedding dimensions")
+                st.success(f"✅ Collection '{collection_name}' wurde mit korrekten Dimensionen neu erstellt")
+            else:
+                raise e
         
         # Dokumente hinzufügen (ChromaDB erstellt automatisch Embeddings wenn None übergeben wird)
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
