@@ -163,13 +163,17 @@
 
   - _Requirements: 4.6, 4.7, 4.8, 4.9, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7_
 
-- [ ] 3.1 Implement SQLite Compatibility Fix
+- [x] 3.1 Implement SQLite Compatibility Fix
+
+
   - Create packages.txt file with libsqlite3-dev dependency
 
 
   - Add pysqlite3-binary to requirements.txt
   - Implement SQLite module replacement hack at app startup
   - _Requirements: 4.6, 4.7, 7.1, 7.2_
+
+
 
 - [ ] 3.2 Create In-Memory ChromaDB Client
   - Modify utils.py to use in-memory ChromaDB client instead of persistent
@@ -196,11 +200,13 @@
   - Integrate with modified ChromaDB setup
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
 
-- [ ] 4.1 Create Modal-Integrated Ingestion Module
+- [x] 4.1 Create Modal-Integrated Ingestion Module
+
   - Create insert_docs_streamlit.py as adaptation of original insert_docs.py
   - Replace local crawling functions with Modal crawler client calls
   - Maintain existing smart_chunk_markdown and utility functions
   - _Requirements: 3.1, 3.6_
+
 
 - [ ] 4.2 Implement URL Type Detection and Strategy Selection
   - Adapt URL type detection for different crawling modes
@@ -208,9 +214,16 @@
   - Map URL types to corresponding crawler client methods
   - _Requirements: 3.6_
 
-- [ ] 4.3 Integrate Vertex AI Embeddings with New Pipeline
+- [x] 4.3 Integrate Vertex AI Embeddings with New Pipeline
+
+
+
+
+
+
   - Maintain existing Vertex AI embedding generation functionality
   - Ensure compatibility with new crawling results format
+
   - Add error handling for embedding generation failures
   - _Requirements: 3.3, 3.4_
 
@@ -326,12 +339,15 @@
   - Validate performance and error handling
   - _Requirements: 4.1, 4.4, 4.5, 6.1, 6.2, 6.3, 6.5, 8.1, 8.2, 8.3, 8.4, 8.5_
 
-- [ ] 8.1 Deploy Modal.com Service
+- [x] 8.1 Deploy Modal.com Service
+
   - Execute modal deploy command for crawling service
   - Verify all endpoints are accessible and functional
   - Test authentication and error responses
   - Document service URLs and API keys
   - _Requirements: 4.1_
+
+
 
 - [ ] 8.2 Deploy Streamlit App to Community Cloud
   - Create GitHub repository with all necessary files

@@ -435,9 +435,22 @@ async def run_ingestion_with_modal(
             print("No valid Vertex AI configuration found, using ChromaDB default embeddings")
             st.info("ℹ️ Verwende ChromaDB Standard-Embeddings (384 Dimensionen) - keine Google Cloud Konfiguration")
         
-        # Schritt 5: In ChromaDB speichern
+        # Schritt 5: Memory-Check und ChromaDB-Speicherung
         if progress:
             progress.update(5, f"Speichere {len(all_chunks)} Chunks in ChromaDB...")
+        
+        # Memory-Monitoring für Streamlit Cloud
+        chunk_count = len(all_chunks)
+        estimated_memory_mb = chunk_count * 0.5  # Grobe Schätzung: 0.5MB pro Chunk
+        
+        # Warnungen für Memory-Limits (Streamlit Cloud hat ~1GB RAM)
+        if estimated_memory_mb > 500:
+            st.warning(f"⚠️ Hoher Speicherverbrauch erwartet: ~{estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
+        if estimated_memory_mb > 800:
+            st.error(f"❌ Speicherlimit möglicherweise überschritten! Reduziere die Anzahl der Dokumente oder Chunk-Größe.")
+            raise ValueError(f"Memory limit exceeded: {estimated_memory_mb:.0f}MB estimated for {chunk_count} chunks")
+        
+        print(f"Memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks")
         
         # Collection erstellen oder laden mit korrekter Embedding-Funktion
         from chromadb.utils import embedding_functions
@@ -499,16 +512,34 @@ async def run_ingestion_with_modal(
             else:
                 raise e
         
-        # Dokumente hinzufügen (ChromaDB erstellt automatisch Embeddings wenn None übergeben wird)
+        # Dokumente in Batches hinzufügen für bessere Memory-Performance
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
+            # Dynamische Batch-Größe basierend auf Chunk-Anzahl
+            if chunk_count > 1000:
+                batch_size = 50  # Kleinere Batches für große Datasets
+                st.info(f"ℹ️ Verwende kleinere Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+            elif chunk_count > 500:
+                batch_size = 75
+            else:
+                batch_size = 100
+            
+            print(f"Adding {chunk_count} documents in batches of {batch_size}")
+            
             add_documents_to_collection(
                 collection=collection,
                 ids=all_ids,
                 documents=all_chunks,
                 embeddings=all_embeddings,  # None = ChromaDB Standard-Embeddings
                 metadatas=all_metadatas,
-                batch_size=100
+                batch_size=batch_size
             )
+            
+            # Memory-Status nach dem Hinzufügen
+            final_count = collection.count()
+            print(f"Collection now contains {final_count} documents")
+            if final_count > 5000:
+                st.warning(f"⚠️ Collection enthält {final_count} Dokumente. Performance könnte beeinträchtigt sein.")
+                
         else:
             raise ValueError("Keine Chunks zum Speichern verfügbar")
         
