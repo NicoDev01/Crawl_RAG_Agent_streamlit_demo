@@ -221,6 +221,7 @@
 
 
 
+
   - Maintain existing Vertex AI embedding generation functionality
   - Ensure compatibility with new crawling results format
 
