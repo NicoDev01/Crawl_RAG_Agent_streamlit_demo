@@ -1,0 +1,24 @@
+# Streamlit Community Cloud Requirements
+streamlit==1.45.0
+pysqlite3-binary
+
+# ChromaDB and Vector Database
+chromadb==1.0.7
+
+# HTTP Client for Modal.com API
+aiohttp==3.11.18
+tenacity==9.1.2
+
+# Google Cloud Dependencies (optional, for Vertex AI)
+google-cloud-aiplatform
+google-cloud-discoveryengine
+google-generativeai
+
+# AI and ML Dependencies
+openai==1.76.2
+pydantic==2.11.4
+pydantic-ai==0.1.8
+
+# Utility Dependencies
+python-dotenv==1.1.0
+requests==2.32.3
