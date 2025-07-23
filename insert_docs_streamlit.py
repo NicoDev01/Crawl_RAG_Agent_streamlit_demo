@@ -261,7 +261,9 @@ async def run_ingestion_with_modal(
     max_depth: int = 3,
     max_concurrent: int = 5,
     limit: Optional[int] = 100,
-    progress: Optional[IngestionProgress] = None
+    progress: Optional[IngestionProgress] = None,
+    auto_reduce: bool = True,
+    max_chunks: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Führt die komplette Ingestion mit Modal.com Crawler durch.
@@ -485,18 +487,72 @@ async def run_ingestion_with_modal(
         if progress:
             progress.update(5, f"Speichere {len(all_chunks)} Chunks in ChromaDB...")
         
-        # Memory-Monitoring für Streamlit Cloud
+        # Intelligentes Memory-Management für Streamlit Cloud
         chunk_count = len(all_chunks)
-        estimated_memory_mb = chunk_count * 0.5  # Grobe Schätzung: 0.5MB pro Chunk
         
-        # Warnungen für Memory-Limits (Streamlit Cloud hat ~1GB RAM)
-        if estimated_memory_mb > 500:
-            st.warning(f"⚠️ Hoher Speicherverbrauch erwartet: ~{estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
-        if estimated_memory_mb > 800:
-            st.error(f"❌ Speicherlimit möglicherweise überschritten! Reduziere die Anzahl der Dokumente oder Chunk-Größe.")
+        # Realistischere Memory-Schätzung basierend auf tatsächlicher Chunk-Größe
+        avg_chunk_size = sum(len(chunk) for chunk in all_chunks) / len(all_chunks) if all_chunks else 0
+        estimated_memory_mb = (chunk_count * avg_chunk_size * 2) / (1024 * 1024)  # Text + Embeddings + Overhead
+        
+        print(f"Memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks (avg size: {avg_chunk_size:.0f} chars)")
+        
+        # Chunk-Reduktion basierend auf Benutzer-Einstellungen oder Memory-Limits
+        original_chunk_count = chunk_count
+        reduction_applied = False
+        
+        # Benutzer-definiertes Chunk-Limit
+        if max_chunks and chunk_count > max_chunks:
+            st.info(f"🔢 Reduziere auf benutzer-definiertes Limit: {max_chunks} Chunks")
+            target_chunks = max_chunks
+            reduction_applied = True
+        # Automatische Memory-basierte Reduktion
+        elif auto_reduce and (chunk_count > 5000 or estimated_memory_mb > 800):
+            if estimated_memory_mb > 800:
+                target_chunks = int(800 * chunk_count / estimated_memory_mb)
+                st.warning(f"🔄 Auto-Reduktion: {target_chunks} Chunks um Memory-Limit einzuhalten")
+                reduction_applied = True
+            elif chunk_count > 5000:
+                target_chunks = 5000
+                st.warning(f"🔄 Auto-Reduktion: {target_chunks} Chunks für bessere Performance")
+                reduction_applied = True
+        
+        if reduction_applied:
+            # Intelligentes Sampling: Behalte die besten Chunks
+            chunk_scores = []
+            for i, chunk in enumerate(all_chunks):
+                # Score basierend auf Länge, Struktur und Informationsgehalt
+                score = len(chunk) * (1 + chunk.count('.') * 0.1 + chunk.count('#') * 0.2)
+                # Bevorzuge Chunks mit Headers und strukturiertem Content
+                if any(header in chunk for header in ['##', '###', '**']):
+                    score *= 1.2
+                chunk_scores.append((score, i))
+            
+            # Sortiere nach Score und nimm die besten
+            chunk_scores.sort(reverse=True)
+            selected_indices = [idx for _, idx in chunk_scores[:target_chunks]]
+            selected_indices.sort()  # Behalte ursprüngliche Reihenfolge
+            
+            # Filtere Arrays
+            all_chunks = [all_chunks[i] for i in selected_indices]
+            all_metadatas = [all_metadatas[i] for i in selected_indices]
+            all_ids = [all_ids[i] for i in selected_indices]
+            if all_embeddings:
+                all_embeddings = [all_embeddings[i] for i in selected_indices]
+            
+            chunk_count = len(all_chunks)
+            estimated_memory_mb = (chunk_count * avg_chunk_size * 2) / (1024 * 1024)
+            
+            st.success(f"✅ Dataset reduziert: {original_chunk_count} → {chunk_count} Chunks (~{estimated_memory_mb:.0f}MB)")
+        
+        # Finale Memory-Prüfung mit höherem Limit
+        if estimated_memory_mb > 1200:  # Erhöhtes Limit, da Schätzung konservativer ist
+            st.error(f"❌ Memory-Limit überschritten: {estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
+            st.info("💡 Versuche: Kleinere Chunk-Größe, weniger URLs, oder verwende 'Einzelne URL' statt 'Sitemap'")
             raise ValueError(f"Memory limit exceeded: {estimated_memory_mb:.0f}MB estimated for {chunk_count} chunks")
+        elif estimated_memory_mb > 800:
+            st.warning(f"⚠️ Hoher Speicherverbrauch: ~{estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
         
-        print(f"Memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks")
+        print(f"Final memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks")
         
         # Collection erstellen oder laden mit korrekter Embedding-Funktion
         from chromadb.utils import embedding_functions

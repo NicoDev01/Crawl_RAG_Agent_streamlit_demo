@@ -211,9 +211,17 @@ def main():
             
             # Erweiterte Optionen
             with st.expander("🔧 Erweiterte Optionen"):
-                chunk_size = st.slider("Chunk-Größe:", 500, 3000, 1500)
+                chunk_size = st.slider("Chunk-Größe:", 500, 3000, 1500, 
+                                     help="Kleinere Chunks = weniger Memory, aber möglicherweise weniger Kontext")
                 chunk_overlap = st.slider("Chunk-Überlappung:", 50, 500, 150)
                 max_concurrent = st.slider("Max. parallele Prozesse:", 1, 10, 5)
+                
+                # Memory-Management Optionen
+                st.subheader("💾 Memory-Management")
+                auto_reduce = st.checkbox("Auto-Reduktion bei Memory-Problemen", value=True,
+                                        help="Reduziert automatisch die Anzahl der Chunks bei Memory-Problemen")
+                max_chunks = st.number_input("Max. Chunks (0 = unbegrenzt):", 0, 10000, 0,
+                                           help="Begrenzt die maximale Anzahl der Chunks für Memory-Management")
             
             submitted = st.form_submit_button(
                 "🚀 Wissensdatenbank erstellen",
@@ -245,7 +253,9 @@ def main():
                     max_depth=max_depth,
                     max_concurrent=max_concurrent,
                     limit=limit,
-                    progress=progress
+                    progress=progress,
+                    auto_reduce=auto_reduce,
+                    max_chunks=max_chunks if max_chunks > 0 else None
                 )
                 
                 st.session_state.ingestion_result = result
