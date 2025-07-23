@@ -345,27 +345,15 @@ def main():
                                     )
                                     
                                     if results['documents'] and results['documents'][0]:
-                                        # Kontext aus den gefundenen Dokumenten erstellen
-                                        context_docs = results['documents'][0]
-                                        context_metadata = results['metadatas'][0]
+                                        # Import der verbesserten RAG-Funktion
+                                        from insert_docs_streamlit import generate_rag_response
                                         
-                                        # Einfache Antwort basierend auf gefundenen Dokumenten
-                                        context_text = "\n\n".join(context_docs[:3])  # Top 3 Ergebnisse
-                                        
-                                        response = f"""**Basierend auf der Wissensdatenbank '{selected_collection}':**
-
-{context_text[:1000]}...
-
-**Quellen:**
-"""
-                                        # URLs aus Metadaten extrahieren
-                                        sources = set()
-                                        for meta in context_metadata[:3]:
-                                            if 'url' in meta:
-                                                sources.add(meta['url'])
-                                        
-                                        for i, source in enumerate(sources, 1):
-                                            response += f"\n{i}. {source}"
+                                        # Intelligente RAG-Antwort generieren
+                                        response = generate_rag_response(
+                                            query=prompt,
+                                            search_results=results,
+                                            collection_name=selected_collection
+                                        )
                                         
                                         st.markdown(response)
                                         

@@ -698,6 +698,117 @@ def query_collection_sync(collection, query_text: str, n_results: int = 5) -> Di
     """Synchroner Wrapper für query_collection_with_embeddings."""
     return asyncio.run(query_collection_with_embeddings(collection, query_text, n_results))
 
+def clean_wikipedia_text(text: str) -> str:
+    """Bereinigt Wikipedia-Markup und andere Störungen aus dem Text."""
+    if not text:
+        return text
+    
+    # Wikipedia-spezifische Bereinigungen
+    text = re.sub(r'Datei:[^)]*\)', '', text)  # Entferne "Datei:xyz.svg)"
+    text = re.sub(r'\[Bearbeiten \| Quelltext bearbeiten\]', '', text)  # Wikipedia-Edit-Links
+    text = re.sub(r'\[\d+\]', '', text)  # Referenz-Nummern [1], [2], etc.
+    text = re.sub(r'\[.*?\]', '', text)  # Andere eckige Klammern
+    text = re.sub(r'→ Hauptartikel:.*?\n', '', text)  # Hauptartikel-Verweise
+    text = re.sub(r'Siehe auch:.*?\n', '', text)  # Siehe-auch-Verweise
+    text = re.sub(r'Weblinks.*$', '', text, flags=re.DOTALL)  # Weblinks-Sektion
+    text = re.sub(r'Literatur.*$', '', text, flags=re.DOTALL)  # Literatur-Sektion
+    text = re.sub(r'Einzelnachweise.*$', '', text, flags=re.DOTALL)  # Einzelnachweise
+    
+    # Allgemeine Bereinigungen
+    text = re.sub(r'\n\s*\n', '\n', text)  # Mehrfache Leerzeilen
+    text = re.sub(r'^\s+|\s+$', '', text, flags=re.MULTILINE)  # Leerzeichen am Zeilenanfang/-ende
+    text = text.strip()
+    
+    return text
+
+def generate_rag_response(query: str, search_results: Dict[str, Any], collection_name: str) -> str:
+    """
+    Generiert eine intelligente RAG-Antwort basierend auf den Suchergebnissen.
+    """
+    try:
+        documents = search_results.get('documents', [[]])[0]
+        metadatas = search_results.get('metadatas', [[]])[0]
+        distances = search_results.get('distances', [[]])[0]
+        
+        if not documents:
+            return "❌ Keine relevanten Informationen gefunden."
+        
+        # Bereinige und filtere die besten Chunks
+        cleaned_chunks = []
+        sources = set()
+        
+        for i, (doc, meta, distance) in enumerate(zip(documents[:3], metadatas[:3], distances[:3])):
+            # Text bereinigen
+            cleaned_doc = clean_wikipedia_text(doc)
+            
+            # Nur relevante Chunks verwenden (nicht zu kurz, nicht nur Referenzen)
+            if len(cleaned_doc) > 50 and not cleaned_doc.startswith('↑'):
+                cleaned_chunks.append({
+                    'text': cleaned_doc,
+                    'url': meta.get('url', ''),
+                    'distance': distance,
+                    'headers': meta.get('headers', '')
+                })
+                
+                if meta.get('url'):
+                    sources.add(meta['url'])
+        
+        if not cleaned_chunks:
+            return "❌ Keine verwertbaren Informationen nach der Bereinigung gefunden."
+        
+        # Erstelle eine strukturierte Antwort
+        response_parts = []
+        response_parts.append(f"**Antwort basierend auf '{collection_name}':**\n")
+        
+        # Hauptantwort aus dem besten Chunk
+        best_chunk = cleaned_chunks[0]
+        main_text = best_chunk['text']
+        
+        # Kürze den Text intelligent (an Satzenden)
+        if len(main_text) > 800:
+            sentences = main_text.split('. ')
+            truncated = []
+            current_length = 0
+            
+            for sentence in sentences:
+                if current_length + len(sentence) > 800:
+                    break
+                truncated.append(sentence)
+                current_length += len(sentence)
+            
+            main_text = '. '.join(truncated)
+            if not main_text.endswith('.'):
+                main_text += '.'
+        
+        response_parts.append(main_text)
+        
+        # Zusätzliche relevante Informationen
+        if len(cleaned_chunks) > 1:
+            response_parts.append("\n**Weitere relevante Informationen:**")
+            for chunk in cleaned_chunks[1:2]:  # Nur einen zusätzlichen Chunk
+                additional_text = chunk['text'][:300]
+                if len(chunk['text']) > 300:
+                    # Finde das letzte vollständige Wort
+                    last_space = additional_text.rfind(' ')
+                    if last_space > 200:
+                        additional_text = additional_text[:last_space] + '...'
+                response_parts.append(f"• {additional_text}")
+        
+        # Quellen hinzufügen
+        if sources:
+            response_parts.append("\n**Quellen:**")
+            for i, source in enumerate(sorted(sources), 1):
+                response_parts.append(f"{i}. {source}")
+        
+        # Debug-Info (optional, kann später entfernt werden)
+        response_parts.append(f"\n*Gefunden: {len(documents)} Chunks, verwendet: {len(cleaned_chunks)} nach Bereinigung*")
+        
+        return '\n'.join(response_parts)
+        
+    except Exception as e:
+        print(f"Error generating RAG response: {e}")
+        return f"❌ Fehler bei der Antwortgenerierung: {str(e)}"
+
 # Synchroner Wrapper für Streamlit
 def run_ingestion_sync(
     url: str,
