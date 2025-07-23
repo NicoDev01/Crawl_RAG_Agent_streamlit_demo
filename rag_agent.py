@@ -315,26 +315,56 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
     initial_n_results = max(25, n_results * 2)
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
-    query_embedding_for_chroma = get_vertex_text_embedding(
-        text=hypothetical_answer,
-        model_name=context.deps.embedding_model_name,
-        task_type="RETRIEVAL_QUERY",
-        project_id=context.deps.vertex_project_id,
-        location=context.deps.vertex_location
-    )
-    if query_embedding_for_chroma is None:
-        return "Error generating query embedding with Vertex AI."
-
+    # Intelligente Embedding-Auswahl basierend auf Collection-Typ
     try:
         collection = get_or_create_collection(
             client=context.deps.chroma_client,
             collection_name=context.deps.collection_name
         )
-        results = collection.query(
-            query_embeddings=[query_embedding_for_chroma],
-            n_results=initial_n_results,
-            include=['metadatas', 'documents']
-        )
+        
+        # Prüfe die Collection-Dimensionen durch Abrufen eines Beispiel-Dokuments
+        collection_embedding_dim = None
+        try:
+            sample = collection.get(limit=1, include=["embeddings"])
+            if sample["embeddings"] and len(sample["embeddings"]) > 0:
+                collection_embedding_dim = len(sample["embeddings"][0])
+                print(f"---> Detected collection embedding dimension: {collection_embedding_dim}")
+        except Exception as e:
+            print(f"Could not detect collection embedding dimension: {e}")
+        
+        # Wähle die passende Embedding-Methode
+        query_embedding_for_chroma = None
+        
+        if collection_embedding_dim == 384:
+            # Collection verwendet ChromaDB Default Embeddings
+            print("---> Using ChromaDB default embeddings for query (384D)")
+            # Verwende ChromaDB's eingebaute Embedding-Funktion durch query_texts
+            results = collection.query(
+                query_texts=[hypothetical_answer],
+                n_results=initial_n_results,
+                include=['metadatas', 'documents']
+            )
+            print("---> Query executed with ChromaDB default embeddings")
+        else:
+            # Collection verwendet wahrscheinlich Vertex AI Embeddings
+            print("---> Using Vertex AI embeddings for query")
+            query_embedding_for_chroma = get_vertex_text_embedding(
+                text=hypothetical_answer,
+                model_name=context.deps.embedding_model_name,
+                task_type="RETRIEVAL_QUERY",
+                project_id=context.deps.vertex_project_id,
+                location=context.deps.vertex_location
+            )
+            if query_embedding_for_chroma is None:
+                return "Error generating query embedding with Vertex AI."
+            
+            results = collection.query(
+                query_embeddings=[query_embedding_for_chroma],
+                n_results=initial_n_results,
+                include=['metadatas', 'documents']
+            )
+            print("---> Query executed with Vertex AI embeddings")
+            
         if not results or not results.get('ids') or not results['ids'][0]:
              return "No relevant context found."
     except Exception as e:
@@ -431,26 +461,66 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
     initial_n_results = 25
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
-    query_embedding_for_chroma = get_vertex_text_embedding(
-        text=hypothetical_answer,
-        model_name=deps.embedding_model_name,
-        task_type="RETRIEVAL_QUERY",
-        project_id=deps.vertex_project_id,
-        location=deps.vertex_location
-    )
-    if query_embedding_for_chroma is None:
-        return "Error generating query embedding with Vertex AI."
-
+    # Intelligente Embedding-Auswahl basierend auf Collection-Typ
     try:
         collection = get_or_create_collection(
             client=deps.chroma_client,
             collection_name=deps.collection_name
         )
-        results = collection.query(
-            query_embeddings=[query_embedding_for_chroma],
-            n_results=initial_n_results,
-            include=['metadatas', 'documents']
-        )
+        
+        # Prüfe die Collection-Dimensionen durch Abrufen eines Beispiel-Dokuments
+        collection_embedding_dim = None
+        try:
+            sample = collection.get(limit=1, include=["embeddings"])
+            if sample["embeddings"] and len(sample["embeddings"]) > 0:
+                collection_embedding_dim = len(sample["embeddings"][0])
+                print(f"---> Detected collection embedding dimension: {collection_embedding_dim}")
+        except Exception as e:
+            print(f"Could not detect collection embedding dimension: {e}")
+        
+        # Wähle die passende Embedding-Methode
+        query_embedding_for_chroma = None
+        
+        if collection_embedding_dim == 384:
+            # Collection verwendet ChromaDB Default Embeddings
+            print("---> Using ChromaDB default embeddings for query (384D)")
+            # Verwende ChromaDB's eingebaute Embedding-Funktion durch query_texts
+            query_embedding_for_chroma = None  # Signal für query_texts usage
+        else:
+            # Collection verwendet wahrscheinlich Vertex AI Embeddings
+            print("---> Using Vertex AI embeddings for query")
+            query_embedding_for_chroma = get_vertex_text_embedding(
+                text=hypothetical_answer,
+                model_name=deps.embedding_model_name,
+                task_type="RETRIEVAL_QUERY",
+                project_id=deps.vertex_project_id,
+                location=deps.vertex_location
+            )
+            if query_embedding_for_chroma is None:
+                return "Error generating query embedding with Vertex AI."
+        
+    except Exception as e:
+        raise RetrievalError(f"Failed to access collection for embedding detection: {e}") from e
+
+    try:
+        # Query-Ausführung basierend auf Embedding-Typ
+        if query_embedding_for_chroma is None:
+            # Verwende ChromaDB Default Embeddings
+            results = collection.query(
+                query_texts=[hypothetical_answer],
+                n_results=initial_n_results,
+                include=['metadatas', 'documents']
+            )
+            print("---> Query executed with ChromaDB default embeddings")
+        else:
+            # Verwende Vertex AI Embeddings
+            results = collection.query(
+                query_embeddings=[query_embedding_for_chroma],
+                n_results=initial_n_results,
+                include=['metadatas', 'documents']
+            )
+            print("---> Query executed with Vertex AI embeddings")
+            
         if not results or not results.get('ids') or not results['ids'][0]:
              return "No relevant context found."
     except Exception as e:
