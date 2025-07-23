@@ -368,6 +368,26 @@ async def run_ingestion_with_modal(
         # Überspringe Vertex AI wenn Platzhalter-Werte verwendet werden
         if vertex_project_id and vertex_project_id != "your-gcp-project-id":
             try:
+                # Setup Google Cloud Credentials falls noch nicht geschehen
+                if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+                    print("Setting up Google Cloud credentials from Streamlit secrets...")
+                    creds_json_b64 = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+                    if creds_json_b64:
+                        import base64
+                        import tempfile
+                        # Dekodiere und speichere temporär
+                        creds_json = base64.b64decode(creds_json_b64).decode('utf-8')
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w') as temp:
+                            temp.write(creds_json)
+                            temp_filename = temp.name
+                        
+                        # Setze die Umgebungsvariable
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_filename
+                        print("✅ Google Cloud Credentials successfully loaded from secrets")
+                        st.info("✅ Google Cloud Credentials geladen")
+                    else:
+                        raise ValueError("GOOGLE_APPLICATION_CREDENTIALS_JSON not found in secrets")
+                
                 # Embedding-Modell konfigurieren (aus Umgebungsvariablen oder Standard)
                 embedding_model = os.environ.get("VERTEX_EMBEDDING_MODEL", "text-multilingual-embedding-002")
                 if hasattr(st, 'secrets') and st.secrets.get("VERTEX_EMBEDDING_MODEL"):
@@ -428,12 +448,38 @@ async def run_ingestion_with_modal(
                 
             except Exception as e:
                 print(f"Vertex AI embedding generation failed: {e}")
-                st.warning(f"⚠️ Vertex AI Embeddings fehlgeschlagen: {str(e)}")
+                st.error(f"❌ Vertex AI Embeddings fehlgeschlagen: {str(e)}")
                 st.info("🔄 Verwende ChromaDB Standard-Embeddings (384 Dimensionen)")
                 all_embeddings = None  # ChromaDB wird Standard-Embeddings verwenden
+                
+                # Wichtig: Bei Vertex AI Fehlern müssen wir sicherstellen, dass bestehende Collections
+                # mit Vertex AI Embeddings gelöscht werden, da sie inkompatibel sind
+                try:
+                    existing_collections = [c.name for c in chroma_client.list_collections()]
+                    if collection_name in existing_collections:
+                        print(f"Deleting existing collection '{collection_name}' due to embedding type change")
+                        chroma_client.delete_collection(name=collection_name)
+                        st.warning(f"⚠️ Bestehende Collection '{collection_name}' gelöscht (Embedding-Typ geändert)")
+                except Exception as delete_error:
+                    print(f"Could not delete existing collection: {delete_error}")
+                    
         else:
             print("No valid Vertex AI configuration found, using ChromaDB default embeddings")
             st.info("ℹ️ Verwende ChromaDB Standard-Embeddings (384 Dimensionen) - keine Google Cloud Konfiguration")
+            
+            # Auch hier: Bestehende Vertex AI Collections löschen
+            try:
+                existing_collections = [c.name for c in chroma_client.list_collections()]
+                if collection_name in existing_collections:
+                    # Prüfe ob die Collection Vertex AI Embeddings hat
+                    test_collection = chroma_client.get_collection(name=collection_name)
+                    compatibility = check_embedding_compatibility(test_collection, None)
+                    if compatibility.get("expected_dimension") and compatibility["expected_dimension"] > 384:
+                        print(f"Deleting existing Vertex AI collection '{collection_name}'")
+                        chroma_client.delete_collection(name=collection_name)
+                        st.warning(f"⚠️ Bestehende Vertex AI Collection '{collection_name}' gelöscht")
+            except Exception as delete_error:
+                print(f"Could not check/delete existing collection: {delete_error}")
         
         # Schritt 5: Memory-Check und ChromaDB-Speicherung
         if progress:
