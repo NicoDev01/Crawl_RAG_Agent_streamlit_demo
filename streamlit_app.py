@@ -146,8 +146,8 @@ def create_knowledge_base(crawler_client, chroma_client):
         st.markdown("""
         **🎯 Crawling-Typen erklärt:**
         
-        - **📄 Einzelne Webseite**: Crawlt nur die angegebene URL
-        - **🔗 Mehrere Seiten**: Folgt Links von der Startseite (konfigurierbare Tiefe)
+        - **📄 Einzelne Webseite**: Crawlt nur die angegebene URL (keine Links werden verfolgt)
+        - **🔗 Mehrere Seiten**: Folgt Links von der Startseite bis zur angegebenen Tiefe
         - **🗺️ Sitemap**: Crawlt alle URLs aus einer sitemap.xml Datei
         
         **⚙️ Wichtige Parameter:**
@@ -155,8 +155,16 @@ def create_knowledge_base(crawler_client, chroma_client):
         - **Crawling-Tiefe**: Wie tief sollen Links verfolgt werden? (1 = nur Startseite, 2 = + verlinkte Seiten, etc.)
         - **Max. Seiten**: Begrenze die Anzahl der Seiten um Kosten und Zeit zu sparen
         - **Chunk-Größe**: Kleinere Chunks (800-1200) = präzisere Antworten, Größere Chunks (1500-2000) = mehr Kontext
+        - **Parallele Prozesse**: Höhere Werte = schnelleres Crawling, aber mehr Serverlast
         
         **💰 Tipp**: Starte mit wenigen Seiten (5-10) zum Testen, bevor du große Websites crawlst!
+        
+        **🔧 Empfohlene Einstellungen:**
+        
+        - **Einzelne Seite testen**: Tiefe=1, Seiten=1
+        - **Kleine Website**: Tiefe=2, Seiten=10-20
+        - **Große Website**: Tiefe=2, Seiten=50+ (Vorsicht bei Kosten!)
+        - **Vollständige Website**: Sitemap verwenden
         """)
     
     with st.form("knowledge_creation"):
@@ -185,41 +193,58 @@ def create_knowledge_base(crawler_client, chroma_client):
                 help="Bestimmt, wie die Website durchsucht wird"
             )
         
-        # Dynamische Konfiguration basierend auf Typ
+        # Crawling-Einstellungen für alle Typen
         st.subheader("⚙️ Crawling-Einstellungen")
         
+        # Typ-spezifische Informationen
         if source_type == "Einzelne Webseite":
-            st.info("📄 Crawlt nur die angegebene URL - schnell und präzise")
-            max_depth = 1
-            max_pages = 1
-            
+            st.info("📄 Crawlt nur die angegebene URL - keine Links werden verfolgt")
         elif source_type == "Mehrere Seiten":
             st.warning("🔗 Folgt Links von der Startseite - kann viele Seiten finden!")
+        elif source_type == "Sitemap":
+            st.success("�️ Cratwlt alle URLs aus der Sitemap - ideal für vollständige Websites")
+            st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
+        
+        # Gemeinsame Crawling-Einstellungen für alle Typen
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            # Standardwerte basierend auf Typ
+            default_depth = 1 if source_type == "Einzelne Webseite" else 2
+            max_depth = st.slider(
+                "Crawling-Tiefe:",
+                min_value=1, max_value=4, value=default_depth,
+                help="1 = nur angegebene URL(s), 2 = + direkt verlinkte Seiten, 3 = + deren Links, etc."
+            )
             
-            col3, col4 = st.columns(2)
-            with col3:
-                max_depth = st.slider(
-                    "Crawling-Tiefe:",
-                    min_value=1, max_value=4, value=2,
-                    help="1 = nur Startseite, 2 = + direkt verlinkte Seiten, 3 = + deren Links, etc."
-                )
-            with col4:
+            # Erklärung der Tiefe
+            if max_depth == 1:
+                st.caption("Nur die angegebene(n) URL(s) werden gecrawlt")
+            elif max_depth == 2:
+                st.caption("Angegebene URL + direkt verlinkte Seiten")
+            elif max_depth == 3:
+                st.caption("Tiefes Crawling: Folgt Links bis zu 2 Ebenen tief")
+            else:
+                st.caption("Sehr tiefes Crawling: Kann sehr viele Seiten finden!")
+        
+        with col4:
+            if source_type == "Sitemap":
+                st.info("Bei Sitemaps wird die Anzahl der Seiten automatisch erkannt")
+                max_pages = None
+                st.metric("Seiten-Limit", "Automatisch")
+            else:
+                # Standardwerte basierend auf Typ
+                default_pages = 1 if source_type == "Einzelne Webseite" else 20
                 max_pages = st.number_input(
                     "Max. Seiten:",
-                    min_value=1, max_value=100, value=20,
+                    min_value=1, max_value=100, 
+                    value=default_pages,
                     help="Begrenze die Anzahl der Seiten um Zeit und Kosten zu sparen"
                 )
-            
-            # Warnung bei hohen Werten
-            if max_depth > 2 or max_pages > 50:
-                st.warning("⚠️ Hohe Werte können zu langen Ladezeiten und hohen Kosten führen!")
-                
-        elif source_type == "Sitemap":
-            st.success("🗺️ Crawlt alle URLs aus der Sitemap - Anzahl wird automatisch erkannt")
-            max_depth = 1
-            max_pages = None
-            
-            st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
+        
+        # Warnung bei hohen Werten (für alle Typen außer Sitemap)
+        if source_type != "Sitemap" and (max_depth > 2 or (max_pages and max_pages > 50)):
+            st.warning("⚠️ Hohe Werte können zu langen Ladezeiten und hohen Kosten führen!")
         
         # Erweiterte Einstellungen
         with st.expander("🔧 Erweiterte Einstellungen"):
@@ -253,10 +278,16 @@ def create_knowledge_base(crawler_client, chroma_client):
                     help="Mehr Prozesse = schneller, aber höhere Serverlast"
                 )
         
-        # Geschätzte Kosten/Zeit
-        if source_type == "Mehrere Seiten":
-            estimated_time = max_pages * 2  # Grobe Schätzung: 2 Sekunden pro Seite
-            st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seiten")
+        # Geschätzte Kosten/Zeit für alle Typen
+        if source_type == "Mehrere Seiten" and max_pages:
+            estimated_pages = min(max_pages, 10 ** (max_depth - 1) * 5)  # Grobe Schätzung
+            estimated_time = estimated_pages * 2  # Grobe Schätzung: 2 Sekunden pro Seite
+            st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für ca. {estimated_pages} Seiten")
+        elif source_type == "Einzelne Webseite" and max_pages:
+            estimated_time = max_pages * 2
+            st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seite(n)")
+        elif source_type == "Sitemap":
+            st.info("⏱️ Geschätzte Dauer: Abhängig von der Anzahl der URLs in der Sitemap")
         
         submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
         
