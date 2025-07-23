@@ -38,8 +38,8 @@ from vertex_ai_utils import get_vertex_text_embedding, init_vertex_ai
 # Load environment variables from .env file
 dotenv.load_dotenv()
 
-# Check for OpenAI API key
-if not os.getenv("OPENAI_API_KEY"):
+# Check for OpenAI API key (nur für CLI, nicht für Streamlit)
+if not os.getenv("OPENAI_API_KEY") and __name__ == "__main__":
     print("Error: OPENAI_API_KEY environment variable not set.")
     print("Please create a .env file with your OpenAI API key or set it in your environment.")
     sys.exit(1)

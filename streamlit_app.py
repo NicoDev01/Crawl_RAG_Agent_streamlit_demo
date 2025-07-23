@@ -363,13 +363,29 @@ def main():
                                             vertex_reranker_model=None
                                         )
                                         
+                                        # Prüfe Gemini API Key
+                                        gemini_key = st.secrets.get("GEMINI_API_KEY")
+                                        if not gemini_key:
+                                            st.warning("⚠️ GEMINI_API_KEY nicht in Secrets gefunden. Verwende OpenAI Fallback.")
+                                        else:
+                                            print(f"Gemini API Key gefunden: {gemini_key[:10]}...")
+                                            # Setze Umgebungsvariable für rag_agent.py
+                                            import os
+                                            os.environ["GEMINI_API_KEY"] = gemini_key
+                                        
                                         # Verwende den originalen Pydantic AI RAG Agent (synchron)
                                         with st.spinner("Generiere intelligente Antwort mit HyDE + Gemini..."):
+                                            print(f"Starting RAG agent with question: {prompt}")
+                                            print(f"Collection: {selected_collection}")
+                                            print(f"Vertex Project: {vertex_project_id}")
+                                            
                                             response = asyncio.run(run_rag_agent_entrypoint(
                                                 question=prompt,
                                                 deps=deps,
                                                 llm_model="gemini-2.5-flash"
                                             ))
+                                            
+                                            print(f"RAG agent response received: {len(response) if response else 0} characters")
                                         
                                         st.markdown(response)
                                         
@@ -388,8 +404,19 @@ def main():
                                         })
                                         
                                 except Exception as e:
-                                    error_msg = f"Fehler bei der Suche: {str(e)}"
+                                    import traceback
+                                    error_details = traceback.format_exc()
+                                    error_msg = f"Fehler bei der RAG-Suche: {str(e)}"
+                                    
+                                    # Detaillierte Fehlerausgabe für Debugging
                                     st.error(error_msg)
+                                    with st.expander("🔍 Detaillierte Fehlerinformationen"):
+                                        st.code(error_details)
+                                    
+                                    # Auch in Console ausgeben
+                                    print(f"RAG Error: {error_msg}")
+                                    print(f"Full traceback: {error_details}")
+                                    
                                     st.session_state.chat_history.append({
                                         "role": "assistant", 
                                         "content": error_msg
