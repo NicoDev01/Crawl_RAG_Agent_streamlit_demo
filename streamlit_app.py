@@ -1,587 +1,392 @@
 # HACK: SQLite3 Kompatibilität für Streamlit Community Cloud
-# WICHTIG: Dies muss ganz am Anfang stehen, vor allen anderen Imports!
 import sys
-
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-    print("✅ SQLite3 Kompatibilität für Streamlit Cloud aktiviert")
 except ImportError:
-    # Lokal verwenden wir das normale sqlite3
-    print("ℹ️ Verwende lokales sqlite3 (normale Entwicklungsumgebung)")
+    pass
 
 import streamlit as st
 import os
 import asyncio
 import base64
 import tempfile
-import json
-from typing import Optional, Dict, Any
+from typing import Optional
 
-# Jetzt können wir ChromaDB importieren
+# ChromaDB und andere Imports
 import chromadb
-
-# Andere Imports
 from crawler_client import CrawlerClient
 
-# Windows Event Loop Policy für lokale Entwicklung
+# Windows Event Loop Policy
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Streamlit Konfiguration
 st.set_page_config(
-    page_title="RAG Agent - Cloud Version",
+    page_title="🤖 RAG Knowledge Assistant",
     page_icon="🤖",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
+
+# Custom CSS für besseres Design
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        padding: 2rem 0;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
+    .feature-card {
+        background: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+        margin: 1rem 0;
+    }
+    .stButton > button {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        font-weight: bold;
+    }
+    .chat-container {
+        background: white;
+        border-radius: 10px;
+        padding: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
 @st.cache_resource
 def setup_google_cloud_credentials():
     """Setup Google Cloud Credentials aus Streamlit Secrets."""
     try:
-        # Prüfe, ob Credentials als Base64 in Secrets gespeichert sind
         creds_json_b64 = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
         if creds_json_b64:
-            # Dekodiere und speichere temporär
             creds_json = base64.b64decode(creds_json_b64).decode('utf-8')
             with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w') as temp:
                 temp.write(creds_json)
                 temp_filename = temp.name
-            
-            # Setze die Umgebungsvariable
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_filename
-            st.success("✅ Google Cloud Credentials erfolgreich geladen")
             return True
-        else:
-            st.warning("⚠️ Keine Google Cloud Credentials in Secrets gefunden")
-            return False
-    except Exception as e:
-        st.error(f"❌ Fehler beim Laden der Google Cloud Credentials: {e}")
+        return False
+    except Exception:
         return False
 
 @st.cache_resource
 def get_chroma_client():
-    """Erstelle einen In-Memory ChromaDB Client für Streamlit Cloud."""
+    """Erstelle einen In-Memory ChromaDB Client."""
     try:
-        # Verwende In-Memory Client statt persistenten Client
         client = chromadb.Client()
-        st.success("✅ ChromaDB In-Memory Client erfolgreich erstellt")
         return client
-    except Exception as e:
-        st.error(f"❌ Fehler beim Erstellen des ChromaDB Clients: {e}")
+    except Exception:
         return None
 
 @st.cache_resource
 def get_crawler_client():
     """Erstelle den Modal.com Crawler Client."""
     try:
-        # API-Konfiguration aus Streamlit Secrets
         base_url = st.secrets.get("MODAL_API_URL", "https://nico-gt91--crawl4ai-service")
         api_key = st.secrets.get("MODAL_API_KEY")
         
         if not api_key:
-            st.error("❌ MODAL_API_KEY nicht in Streamlit Secrets konfiguriert")
-            return None
-        
-        client = CrawlerClient(base_url=base_url, api_key=api_key)
-        
-        # Test Health Check
-        health = client.health_check_sync()
-        if health.get("status") == "healthy":
-            st.success("✅ Modal.com Crawler Service verbunden")
-            return client
-        else:
-            st.error("❌ Modal.com Crawler Service nicht erreichbar")
             return None
             
-    except Exception as e:
-        st.error(f"❌ Fehler beim Verbinden mit Modal.com Service: {e}")
+        return CrawlerClient(base_url=base_url, api_key=api_key)
+    except Exception:
         return None
 
-def init_session_state():
-    """Initialisiere Session State Variablen."""
-    # Crawler Test State
-    if 'crawling_in_progress' not in st.session_state:
-        st.session_state.crawling_in_progress = False
-    if 'crawl_result' not in st.session_state:
-        st.session_state.crawl_result = None
-    if 'crawl_error' not in st.session_state:
-        st.session_state.crawl_error = None
-    
-    # Ingestion State
-    if 'ingestion_in_progress' not in st.session_state:
-        st.session_state.ingestion_in_progress = False
-    if 'ingestion_result' not in st.session_state:
-        st.session_state.ingestion_result = None
-    if 'ingestion_error' not in st.session_state:
-        st.session_state.ingestion_error = None
-
 def main():
-    st.title("🤖 RAG Agent - Cloud Version")
-    st.markdown("---")
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🤖 RAG Knowledge Assistant</h1>
+        <p>Erstelle intelligente Wissensdatenbanken aus Webseiten und chatte mit deinen Daten</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Initialisiere Session State
-    init_session_state()
+    # Initialisiere Services (im Hintergrund)
+    setup_google_cloud_credentials()
+    chroma_client = get_chroma_client()
+    crawler_client = get_crawler_client()
     
-    # Setup Services
-    st.header("🔧 Service Setup")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.subheader("Google Cloud")
-        gcp_ok = setup_google_cloud_credentials()
-    
-    with col2:
-        st.subheader("ChromaDB")
-        chroma_client = get_chroma_client()
-        chroma_ok = chroma_client is not None
-    
-    with col3:
-        st.subheader("Modal.com Crawler")
-        crawler_client = get_crawler_client()
-        crawler_ok = crawler_client is not None
-    
-    # Zeige Gesamtstatus
-    essential_services_ok = chroma_ok and crawler_ok
-    
-    if essential_services_ok:
-        if gcp_ok:
-            st.success("🎉 Alle Services erfolgreich initialisiert!")
-        else:
-            st.warning("⚠️ Crawler und ChromaDB funktionieren. Google Cloud optional für lokale Tests.")
-    else:
-        st.error("❌ Kritische Services (ChromaDB/Crawler) konnten nicht initialisiert werden")
+    # Prüfe kritische Services
+    if not chroma_client or not crawler_client:
+        st.error("🚨 Service nicht verfügbar. Bitte versuche es später erneut.")
         st.stop()
     
-    st.markdown("---")
-    
-    # Tabs für verschiedene Funktionen
-    tab1, tab2, tab3 = st.tabs(["🕷️ Crawler Test", "📚 Wissensdatenbank erstellen", "🤖 RAG Chat"])
+    # Hauptnavigation
+    tab1, tab2 = st.tabs(["📚 Wissensdatenbank erstellen", "💬 Chat mit deinen Daten"])
     
     with tab1:
-        st.header("🕷️ Crawler Test")
-        
-        url_to_test = st.text_input(
-            "URL zum Testen:",
-            value="https://de.wikipedia.org/wiki/Künstliche_Intelligenz",
-            help="Gib eine URL ein, um den Crawler zu testen"
-        )
-        
-        crawl_type = st.selectbox(
-            "Crawling-Typ:",
-            ["Single URL", "Batch URLs", "Recursive", "Sitemap"]
-        )
+        create_knowledge_base(crawler_client, chroma_client)
     
     with tab2:
-        st.header("📚 Wissensdatenbank erstellen")
+        chat_interface(chroma_client)
+
+def create_knowledge_base(crawler_client, chroma_client):
+    """Benutzerfreundliche Wissensdatenbank-Erstellung."""
+    
+    st.markdown("""
+    <div class="feature-card">
+        <h3>📖 Neue Wissensdatenbank erstellen</h3>
+        <p>Füge eine Website-URL hinzu und erstelle eine durchsuchbare Wissensdatenbank</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.form("knowledge_creation"):
+        col1, col2 = st.columns([2, 1])
         
-        # Import der Ingestion-Pipeline
-        from insert_docs_streamlit import run_ingestion_sync, IngestionProgress
-        
-        with st.form("ingestion_form"):
-            st.subheader("🔧 Konfiguration")
+        with col1:
+            url = st.text_input(
+                "🌐 Website URL:",
+                placeholder="https://example.com",
+                help="URL einer Webseite oder Sitemap"
+            )
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                ingestion_url = st.text_input(
-                    "URL oder Pfad:",
-                    value="https://de.wikipedia.org/wiki/Künstliche_Intelligenz",
-                    help="URL einer Webseite, Sitemap oder Textdatei"
-                )
-                
-                collection_name_input = st.text_input(
-                    "Collection Name (optional):",
-                    help="Leer lassen für automatische Generierung"
-                )
-            
-            with col2:
-                source_type = st.selectbox(
-                    "Quelle-Typ:",
-                    ["Webseite", "Sitemap", "Textdatei"]
-                )
-                
-                if source_type == "Webseite":
-                    max_depth = st.slider("Max. Tiefe:", 1, 5, 2)
-                    limit = st.number_input("Seiten-Limit:", 1, 100, 20)
-                else:
-                    max_depth = 1
-                    limit = 50
-            
-            # Erweiterte Optionen
-            with st.expander("🔧 Erweiterte Optionen"):
-                chunk_size = st.slider("Chunk-Größe:", 500, 3000, 1500, 
-                                     help="Kleinere Chunks = weniger Memory, aber möglicherweise weniger Kontext")
-                chunk_overlap = st.slider("Chunk-Überlappung:", 50, 500, 150)
-                max_concurrent = st.slider("Max. parallele Prozesse:", 1, 10, 5)
-                
-                # Memory-Management Optionen
-                st.subheader("💾 Memory-Management")
-                auto_reduce = st.checkbox("Auto-Reduktion bei Memory-Problemen", value=True,
-                                        help="Reduziert automatisch die Anzahl der Chunks bei Memory-Problemen")
-                max_chunks = st.number_input("Max. Chunks (0 = unbegrenzt):", 0, 10000, 0,
-                                           help="Begrenzt die maximale Anzahl der Chunks für Memory-Management")
-            
-            submitted = st.form_submit_button(
-                "🚀 Wissensdatenbank erstellen",
-                disabled=st.session_state.get('ingestion_in_progress', False)
+            name = st.text_input(
+                "📝 Name der Wissensdatenbank:",
+                placeholder="Meine Wissensdatenbank",
+                help="Eindeutiger Name für deine Wissensdatenbank"
             )
         
-        if submitted and ingestion_url:
-            st.session_state.ingestion_in_progress = True
-            st.session_state.ingestion_result = None
-            st.session_state.ingestion_error = None
-            st.rerun()
-        elif submitted:
-            st.warning("Bitte gib eine URL ein!")
-        
-        # Ingestion Progress
-        if st.session_state.get('ingestion_in_progress', False):
-            st.info("🔄 Erstelle Wissensdatenbank... Dies kann einige Minuten dauern.")
+        with col2:
+            source_type = st.selectbox(
+                "📄 Typ:",
+                ["Einzelne Webseite", "Sitemap", "Mehrere Seiten"],
+                help="Wähle den Typ der Quelle"
+            )
             
-            progress = IngestionProgress()
-            
-            try:
-                result = run_ingestion_sync(
-                    url=ingestion_url,
-                    collection_name=collection_name_input,
-                    crawler_client=crawler_client,
-                    chroma_client=chroma_client,
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    max_depth=max_depth,
-                    max_concurrent=max_concurrent,
-                    limit=limit,
-                    progress=progress,
-                    auto_reduce=auto_reduce,
-                    max_chunks=max_chunks if max_chunks > 0 else None
-                )
-                
-                st.session_state.ingestion_result = result
-                
-            except Exception as e:
-                st.session_state.ingestion_error = str(e)
-            
-            finally:
-                st.session_state.ingestion_in_progress = False
-                st.rerun()
-        
-        # Ingestion Results
-        if st.session_state.get('ingestion_result'):
-            result = st.session_state.ingestion_result
-            st.success("✅ Wissensdatenbank erfolgreich erstellt!")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Collection", result.get('collection_name', 'N/A'))
-            with col2:
-                st.metric("Dokumente", result.get('documents_crawled', 0))
-            with col3:
-                st.metric("Chunks", result.get('chunks_created', 0))
-            with col4:
-                st.metric("Embeddings", result.get('embeddings_generated', 0))
-            
-            if st.button("🗑️ Ergebnis löschen"):
-                st.session_state.ingestion_result = None
-                st.rerun()
-        
-        # Ingestion Errors
-        if st.session_state.get('ingestion_error'):
-            st.error(f"❌ Fehler beim Erstellen der Wissensdatenbank: {st.session_state.ingestion_error}")
-            
-            if st.button("🗑️ Fehler löschen"):
-                st.session_state.ingestion_error = None
-                st.rerun()
-    
-    with tab3:
-        st.header("🤖 RAG Chat")
-        
-        # Verfügbare Collections anzeigen
-        try:
-            collections = chroma_client.list_collections()
-            collection_names = [c.name for c in collections]
-            
-            if collection_names:
-                selected_collection = st.selectbox(
-                    "Wissensdatenbank auswählen:",
-                    collection_names,
-                    help="Wähle eine Wissensdatenbank für den Chat aus"
-                )
-                
-                # Collection Info anzeigen
-                if selected_collection:
-                    collection = chroma_client.get_collection(selected_collection)
-                    chunk_count = collection.count()
-                    
-                    # Versuche die Anzahl der ursprünglichen Dokumente zu ermitteln
-                    try:
-                        sample_metadata = collection.get(limit=chunk_count, include=["metadatas"])
-                        unique_urls = set()
-                        for metadata in sample_metadata["metadatas"]:
-                            if metadata and "url" in metadata:
-                                unique_urls.add(metadata["url"])
-                        doc_count = len(unique_urls)
-                    except:
-                        doc_count = "Unbekannt"
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Collection", selected_collection)
-                    with col2:
-                        st.metric("Dokumente", doc_count)
-                    with col3:
-                        st.metric("Chunks", chunk_count)
-                    
-                    # Chat Interface
-                    st.subheader("💬 Chat")
-                    
-                    # Chat History initialisieren
-                    if 'chat_history' not in st.session_state:
-                        st.session_state.chat_history = []
-                    
-                    # Chat History anzeigen
-                    for message in st.session_state.chat_history:
-                        with st.chat_message(message["role"]):
-                            st.markdown(message["content"])
-                    
-                    # Chat Input
-                    if prompt := st.chat_input("Stelle eine Frage zur Wissensdatenbank..."):
-                        # User Message hinzufügen
-                        st.session_state.chat_history.append({"role": "user", "content": prompt})
-                        
-                        with st.chat_message("user"):
-                            st.markdown(prompt)
-                        
-                        # RAG Response generieren
-                        with st.chat_message("assistant"):
-                            with st.spinner("Suche in der Wissensdatenbank..."):
-                                try:
-                                    # Import der Query-Funktion mit korrekten Embeddings
-                                    from insert_docs_streamlit import query_collection_sync
-                                    
-                                    # Suche mit korrekten Embedding-Dimensionen
-                                    results = query_collection_sync(
-                                        collection=collection,
-                                        query_text=prompt,
-                                        n_results=5
-                                    )
-                                    
-                                    if results['documents'] and results['documents'][0]:
-                                        # Import des originalen Pydantic AI RAG Agents
-                                        from rag_agent import run_rag_agent_entrypoint, RAGDeps
-                                        
-                                        # Setup RAG Dependencies
-                                        vertex_project_id = st.secrets.get("GOOGLE_CLOUD_PROJECT")
-                                        vertex_location = st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-                                        
-                                        deps = RAGDeps(
-                                            chroma_client=chroma_client,
-                                            collection_name=selected_collection,
-                                            embedding_model_name="text-multilingual-embedding-002",
-                                            embedding_provider="vertex_ai",
-                                            vertex_project_id=vertex_project_id,
-                                            vertex_location=vertex_location,
-                                            use_vertex_reranker=False,  # Kann später aktiviert werden
-                                            vertex_reranker_model=None
-                                        )
-                                        
-                                        # Prüfe Gemini API Key
-                                        gemini_key = st.secrets.get("GEMINI_API_KEY")
-                                        if not gemini_key:
-                                            st.warning("⚠️ GEMINI_API_KEY nicht in Secrets gefunden. Verwende OpenAI Fallback.")
-                                        else:
-                                            print(f"Gemini API Key gefunden: {gemini_key[:10]}...")
-                                            # Setze Umgebungsvariable für rag_agent.py
-                                            import os
-                                            os.environ["GEMINI_API_KEY"] = gemini_key
-                                        
-                                        # Verwende den originalen Pydantic AI RAG Agent (synchron)
-                                        with st.spinner("Generiere intelligente Antwort mit HyDE + Gemini..."):
-                                            print(f"Starting RAG agent with question: {prompt}")
-                                            print(f"Collection: {selected_collection}")
-                                            print(f"Vertex Project: {vertex_project_id}")
-                                            
-                                            response = asyncio.run(run_rag_agent_entrypoint(
-                                                question=prompt,
-                                                deps=deps,
-                                                llm_model="gemini-2.5-flash"
-                                            ))
-                                            
-                                            print(f"RAG agent response received: {len(response) if response else 0} characters")
-                                        
-                                        st.markdown(response)
-                                        
-                                        # Response zur Chat History hinzufügen
-                                        st.session_state.chat_history.append({
-                                            "role": "assistant", 
-                                            "content": response
-                                        })
-                                        
-                                    else:
-                                        error_msg = "Keine relevanten Informationen in der Wissensdatenbank gefunden."
-                                        st.error(error_msg)
-                                        st.session_state.chat_history.append({
-                                            "role": "assistant", 
-                                            "content": error_msg
-                                        })
-                                        
-                                except Exception as e:
-                                    import traceback
-                                    error_details = traceback.format_exc()
-                                    error_msg = f"Fehler bei der RAG-Suche: {str(e)}"
-                                    
-                                    # Detaillierte Fehlerausgabe für Debugging
-                                    st.error(error_msg)
-                                    with st.expander("🔍 Detaillierte Fehlerinformationen"):
-                                        st.code(error_details)
-                                    
-                                    # Auch in Console ausgeben
-                                    print(f"RAG Error: {error_msg}")
-                                    print(f"Full traceback: {error_details}")
-                                    
-                                    st.session_state.chat_history.append({
-                                        "role": "assistant", 
-                                        "content": error_msg
-                                    })
-                    
-                    # Chat History löschen
-                    if st.button("🗑️ Chat History löschen"):
-                        st.session_state.chat_history = []
-                        st.rerun()
-                        
+            if source_type == "Mehrere Seiten":
+                max_pages = st.number_input("Max. Seiten:", 1, 50, 10)
             else:
-                st.info("📝 Keine Wissensdatenbanken verfügbar. Erstelle zuerst eine Wissensdatenbank im Tab 'Wissensdatenbank erstellen'.")
-                
-        except Exception as e:
-            st.error(f"Fehler beim Laden der Collections: {e}")
-    
-    # Crawling Button
-    if st.button("🚀 Crawling starten", disabled=st.session_state.crawling_in_progress):
-        if url_to_test:
-            st.session_state.crawling_in_progress = True
-            st.session_state.crawl_result = None
-            st.session_state.crawl_error = None
-            st.rerun()
-        else:
-            st.warning("Bitte gib eine URL ein!")
-    
-    # Crawling Progress
-    if st.session_state.crawling_in_progress:
-        st.info("🔄 Crawling läuft...")
+                max_pages = 1
         
+        # Erweiterte Optionen (eingeklappt)
+        with st.expander("⚙️ Erweiterte Einstellungen"):
+            col3, col4 = st.columns(2)
+            with col3:
+                chunk_size = st.slider("Chunk-Größe:", 500, 2000, 1200, 
+                                     help="Größere Chunks = mehr Kontext, kleinere = präziser")
+            with col4:
+                auto_reduce = st.checkbox("Automatische Optimierung", value=True,
+                                        help="Optimiert automatisch für beste Performance")
+        
+        submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
+        
+        if submitted and url and name:
+            create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client)
+
+def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client):
+    """Prozess der Wissensdatenbank-Erstellung."""
+    
+    # Progress Container
+    progress_container = st.container()
+    
+    with progress_container:
+        st.info("🔄 Erstelle deine Wissensdatenbank...")
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         try:
-            status_text.text("Initialisiere Crawling...")
-            progress_bar.progress(10)
+            # Import der Ingestion-Pipeline
+            from insert_docs_streamlit import run_ingestion_sync, IngestionProgress
             
-            # Führe Crawling basierend auf Typ aus
-            if crawl_type == "Single URL":
-                result = crawler_client.crawl_single_sync(url_to_test)
-            elif crawl_type == "Batch URLs":
-                # Für Demo: Verwende nur eine URL
-                result = crawler_client.crawl_batch_sync([url_to_test])
-            elif crawl_type == "Recursive":
-                result = crawler_client.crawl_recursive_sync(url_to_test, max_depth=2, limit=10)
-            elif crawl_type == "Sitemap":
-                result = crawler_client.crawl_sitemap_sync(url_to_test)
+            # Custom Progress Tracker
+            class UserProgress(IngestionProgress):
+                def update(self, step: int, message: str):
+                    progress = int((step / 5) * 100)
+                    progress_bar.progress(progress)
+                    status_text.text(f"Schritt {step}/5: {message}")
             
+            progress = UserProgress()
+            
+            # Konfiguration basierend auf Typ
+            if source_type == "Sitemap":
+                max_depth = 1
+                limit = None
+            elif source_type == "Mehrere Seiten":
+                max_depth = 2
+                limit = max_pages
+            else:
+                max_depth = 1
+                limit = 1
+            
+            # Ingestion ausführen
+            result = run_ingestion_sync(
+                url=url,
+                collection_name=name,
+                crawler_client=crawler_client,
+                chroma_client=chroma_client,
+                chunk_size=chunk_size,
+                chunk_overlap=150,
+                max_depth=max_depth,
+                limit=limit,
+                progress=progress,
+                auto_reduce=auto_reduce,
+                max_chunks=None
+            )
+            
+            # Erfolg anzeigen
             progress_bar.progress(100)
-            status_text.text("Crawling abgeschlossen!")
+            status_text.empty()
             
-            # Speichere Ergebnis
-            st.session_state.crawl_result = result
+            st.success("🎉 Wissensdatenbank erfolgreich erstellt!")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📄 Dokumente", result.get('documents_crawled', 0))
+            with col2:
+                st.metric("📝 Text-Chunks", result.get('chunks_created', 0))
+            with col3:
+                st.metric("🧠 Embeddings", result.get('embeddings_generated', 0))
+            
+            st.info("💡 Wechsle zum 'Chat' Tab um mit deiner Wissensdatenbank zu interagieren!")
             
         except Exception as e:
-            st.session_state.crawl_error = str(e)
-            progress_bar.progress(0)
-            status_text.text("Crawling fehlgeschlagen!")
-        
-        finally:
-            st.session_state.crawling_in_progress = False
-            st.rerun()
+            progress_bar.empty()
+            status_text.empty()
+            st.error(f"❌ Fehler beim Erstellen der Wissensdatenbank: {str(e)}")
+            
+            if "Memory limit exceeded" in str(e):
+                st.info("💡 Tipp: Versuche eine kleinere Chunk-Größe oder weniger Seiten.")
+
+def chat_interface(chroma_client):
+    """Benutzerfreundliche Chat-Oberfläche."""
     
-    # Ergebnisse anzeigen
-    if st.session_state.crawl_result:
-        st.success("✅ Crawling erfolgreich abgeschlossen!")
-        
-        result = st.session_state.crawl_result
-        
-        # Zeige Zusammenfassung
-        if crawl_type == "Single URL":
-            if result.get("success"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Status", "Erfolgreich ✅")
-                    st.metric("URL", result.get("url", "N/A"))
-                with col2:
-                    markdown_len = len(result.get("markdown", ""))
-                    st.metric("Markdown Länge", f"{markdown_len:,} Zeichen")
-                    links_count = len(result.get("links", {}).get("internal", []))
-                    st.metric("Interne Links", links_count)
-            else:
-                st.error(f"Crawling fehlgeschlagen: {result.get('error')}")
-        
-        elif crawl_type in ["Batch URLs", "Recursive", "Sitemap"]:
-            results_list = result.get("results", [])
-            if results_list:
-                successful = len([r for r in results_list if r.get("success", False)])
-                total = len(results_list)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Erfolgreich", f"{successful}/{total}")
-                with col2:
-                    total_chars = sum(len(r.get("markdown", "")) for r in results_list if r.get("success"))
-                    st.metric("Gesamt Zeichen", f"{total_chars:,}")
-        
-        # Detaillierte Ergebnisse in Expander
-        with st.expander("🔍 Detaillierte Ergebnisse anzeigen"):
-            st.json(result)
-        
-        # Clear Button
-        if st.button("🗑️ Ergebnisse löschen"):
-            st.session_state.crawl_result = None
-            st.rerun()
+    # Verfügbare Collections laden
+    try:
+        collections = [c.name for c in chroma_client.list_collections()]
+    except:
+        collections = []
     
-    # Fehler anzeigen
-    if st.session_state.crawl_error:
-        st.error(f"❌ Crawling fehlgeschlagen: {st.session_state.crawl_error}")
-        
-        if st.button("🗑️ Fehler löschen"):
-            st.session_state.crawl_error = None
-            st.rerun()
+    if not collections:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>🤔 Keine Wissensdatenbanken gefunden</h3>
+            <p>Erstelle zuerst eine Wissensdatenbank im Tab "Wissensdatenbank erstellen"</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
     
-    # Sidebar mit Informationen
-    with st.sidebar:
-        st.header("ℹ️ System Info")
+    # Collection Auswahl
+    st.markdown("### 🗂️ Wähle deine Wissensdatenbank")
+    selected_collection = st.selectbox(
+        "Wissensdatenbank:",
+        collections,
+        label_visibility="collapsed"
+    )
+    
+    if selected_collection:
+        # Collection Info
+        collection = chroma_client.get_collection(selected_collection)
+        chunk_count = collection.count()
         
-        st.subheader("🔧 Services")
-        st.write("✅ Google Cloud" if gcp_ok else "❌ Google Cloud")
-        st.write("✅ ChromaDB" if chroma_ok else "❌ ChromaDB")
-        st.write("✅ Modal.com" if crawler_ok else "❌ Modal.com")
+        # Berechne Dokumente
+        try:
+            sample_metadata = collection.get(limit=min(chunk_count, 1000), include=["metadatas"])
+            unique_urls = set()
+            for metadata in sample_metadata["metadatas"]:
+                if metadata and "url" in metadata:
+                    unique_urls.add(metadata["url"])
+            doc_count = len(unique_urls)
+        except:
+            doc_count = "Unbekannt"
         
-        st.subheader("📊 ChromaDB Status")
-        if chroma_client:
-            try:
-                # Zeige verfügbare Collections (falls vorhanden)
-                collections = chroma_client.list_collections()
-                st.write(f"Collections: {len(collections)}")
-                for collection in collections:
-                    st.write(f"- {collection.name}")
-            except Exception as e:
-                st.write(f"Fehler: {e}")
+        # Info-Karten
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"📄 **{doc_count}** Dokumente")
+        with col2:
+            st.info(f"📝 **{chunk_count}** Text-Chunks")
         
-        st.subheader("🌐 Modal.com Status")
-        if crawler_client:
-            st.write("Service: Verbunden ✅")
-            st.write("Endpunkte:")
-            st.write("- Single URL ✅")
-            st.write("- Batch URLs ✅")
-            st.write("- Recursive ✅")
-            st.write("- Sitemap ✅")
+        st.markdown("---")
+        
+        # Chat Interface
+        st.markdown("### 💬 Chatte mit deiner Wissensdatenbank")
+        
+        # Chat History
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+        
+        # Chat Container
+        chat_container = st.container()
+        
+        with chat_container:
+            # Zeige Chat History
+            for message in st.session_state.chat_history:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+        
+        # Chat Input
+        if prompt := st.chat_input("Stelle eine Frage zu deiner Wissensdatenbank..."):
+            # User Message
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Assistant Response
+            with st.chat_message("assistant"):
+                with st.spinner("🤔 Durchsuche Wissensdatenbank..."):
+                    try:
+                        response = generate_rag_response(prompt, selected_collection, chroma_client)
+                        st.markdown(response)
+                        st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    except Exception as e:
+                        error_msg = f"❌ Entschuldigung, es gab einen Fehler: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
+        
+        # Chat Reset
+        if st.button("🗑️ Chat zurücksetzen"):
+            st.session_state.chat_history = []
+            st.rerun()
+
+def generate_rag_response(question: str, collection_name: str, chroma_client) -> str:
+    """Generiere RAG-Antwort."""
+    try:
+        # Import des RAG Agents
+        from rag_agent import run_rag_agent_entrypoint, RAGDeps
+        
+        # Setup
+        vertex_project_id = st.secrets.get("GOOGLE_CLOUD_PROJECT")
+        vertex_location = st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        
+        # Gemini API Key setzen
+        gemini_key = st.secrets.get("GEMINI_API_KEY")
+        if gemini_key:
+            os.environ["GEMINI_API_KEY"] = gemini_key
+        
+        deps = RAGDeps(
+            chroma_client=chroma_client,
+            collection_name=collection_name,
+            embedding_model_name="text-multilingual-embedding-002",
+            embedding_provider="vertex_ai",
+            vertex_project_id=vertex_project_id,
+            vertex_location=vertex_location,
+            use_vertex_reranker=False,
+            vertex_reranker_model=None
+        )
+        
+        # RAG Agent ausführen
+        response = asyncio.run(run_rag_agent_entrypoint(
+            question=question,
+            deps=deps,
+            llm_model="gemini-2.5-flash"
+        ))
+        
+        return response
+        
+    except Exception as e:
+        return f"❌ Fehler bei der Antwortgenerierung: {str(e)}"
 
 if __name__ == "__main__":
     main()
