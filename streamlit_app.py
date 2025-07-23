@@ -12,6 +12,7 @@ import asyncio
 import base64
 import tempfile
 from typing import Optional
+from datetime import datetime
 
 # ChromaDB und andere Imports
 import chromadb
@@ -499,46 +500,285 @@ def chat_interface(chroma_client):
         
         st.markdown("---")
         
-        # Chat Interface
-        st.markdown("### 💬 Chatte mit deiner Wissensdatenbank")
-        
-        # Chat History
-        if 'chat_history' not in st.session_state:
+        # Verbessertes Chat Interface
+        render_improved_chat_interface(chroma_client, selected_collection)
+
+
+def render_improved_chat_interface(chroma_client, selected_collection):
+    """Render an improved chat interface with better UX and auto-scrolling."""
+    
+    # Chat History initialisieren
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    
+    # CSS für verbessertes Chat-Layout mit Auto-Scroll
+    st.markdown("""
+    <style>
+    /* Chat Input fixiert am unteren Rand */
+    .stChatInput {
+        position: sticky !important;
+        bottom: 0 !important;
+        background-color: white !important;
+        padding: 1rem 0 !important;
+        border-top: 2px solid #667eea !important;
+        z-index: 999 !important;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Chat Input Field Styling */
+    .stChatInput > div > div > div > div {
+        border-radius: 25px !important;
+        border: 2px solid #667eea !important;
+        box-shadow: 0 2px 5px rgba(102, 126, 234, 0.2) !important;
+    }
+    
+    /* Chat Messages Container */
+    .stChatMessage {
+        margin-bottom: 1rem !important;
+        animation: fadeIn 0.3s ease-in !important;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* Message Timestamps */
+    .message-timestamp {
+        font-size: 0.75rem;
+        color: #666;
+        margin-top: 0.5rem;
+        text-align: right;
+    }
+    
+    /* Typing Indicator */
+    .typing-indicator {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem 0;
+        color: #667eea;
+        font-style: italic;
+    }
+    
+    .typing-dots {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 10px;
+    }
+    
+    .typing-dots span {
+        height: 6px;
+        width: 6px;
+        background-color: #667eea;
+        border-radius: 50%;
+        display: inline-block;
+        margin: 0 2px;
+        animation: typing 1.4s infinite ease-in-out;
+    }
+    
+    .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+    
+    @keyframes typing {
+        0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    
+    /* Welcome Message Styling */
+    .welcome-message {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        margin: 1rem 0;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Chat Header mit Statistiken
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        st.markdown("### 💬 Chat mit deiner Wissensdatenbank")
+    
+    with col2:
+        if st.session_state.chat_history:
+            msg_count = len(st.session_state.chat_history)
+            user_msgs = len([m for m in st.session_state.chat_history if m["role"] == "user"])
+            st.metric("💬 Nachrichten", msg_count, delta=f"{user_msgs} Fragen")
+    
+    with col3:
+        if st.button("🗑️ Chat löschen", key="clear_chat", help="Lösche den gesamten Chat-Verlauf"):
             st.session_state.chat_history = []
-        
-        # Chat Container
-        chat_container = st.container()
-        
-        with chat_container:
-            # Zeige Chat History
-            for message in st.session_state.chat_history:
+            st.success("✅ Chat wurde gelöscht!")
+            st.rerun()
+    
+    # Chat Messages Container
+    chat_container = st.container()
+    
+    with chat_container:
+        if st.session_state.chat_history:
+            # Zeige alle Chat-Nachrichten
+            for i, message in enumerate(st.session_state.chat_history):
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
+                    
+                    # Timestamp anzeigen wenn vorhanden
+                    if "timestamp" in message:
+                        try:
+                            timestamp = datetime.fromisoformat(message["timestamp"])
+                            st.markdown(f'<div class="message-timestamp">{timestamp.strftime("%H:%M")}</div>', 
+                                      unsafe_allow_html=True)
+                        except:
+                            pass
+        else:
+            # Welcome Message
+            st.markdown(f"""
+            <div class="welcome-message">
+                <h3>👋 Willkommen!</h3>
+                <p>Ich bin dein KI-Assistent für die Wissensdatenbank <strong>{selected_collection}</strong>.</p>
+                <p>Du kannst mir Fragen stellen wie:</p>
+                <ul>
+                    <li>"Was ist das Hauptthema dieser Dokumentation?"</li>
+                    <li>"Erkläre mir [spezifisches Thema]"</li>
+                    <li>"Gib mir eine Zusammenfassung von [Bereich]"</li>
+                </ul>
+                <p><strong>Stelle einfach deine erste Frage! 🚀</strong></p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Chat Input (bleibt am unteren Rand fixiert)
+    prompt = st.chat_input("Stelle eine Frage zu deiner Wissensdatenbank...")
+    
+    # Chat Input Verarbeitung
+    if prompt:
+        # Timestamp für neue Nachricht
+        current_time = datetime.now()
         
-        # Chat Input
-        if prompt := st.chat_input("Stelle eine Frage zu deiner Wissensdatenbank..."):
-            # User Message
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
+        # User Message zur History hinzufügen
+        st.session_state.chat_history.append({
+            "role": "user", 
+            "content": prompt,
+            "timestamp": current_time.isoformat()
+        })
+        
+        # User Message anzeigen
+        with st.chat_message("user"):
+            st.markdown(prompt)
+            st.markdown(f'<div class="message-timestamp">{current_time.strftime("%H:%M")}</div>', 
+                       unsafe_allow_html=True)
+        
+        # Assistant Response mit Typing Indicator
+        with st.chat_message("assistant"):
+            # Typing Indicator
+            typing_placeholder = st.empty()
+            typing_placeholder.markdown("""
+            <div class="typing-indicator">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <span>Durchsuche Wissensdatenbank...</span>
+            </div>
+            """, unsafe_allow_html=True)
             
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            try:
+                # RAG Response generieren
+                response = generate_rag_response(prompt, selected_collection, chroma_client)
+                
+                # Typing Indicator entfernen und Antwort anzeigen
+                typing_placeholder.empty()
+                st.markdown(response)
+                
+                # Response zur History hinzufügen
+                response_time = datetime.now()
+                st.session_state.chat_history.append({
+                    "role": "assistant", 
+                    "content": response,
+                    "timestamp": response_time.isoformat()
+                })
+                
+                # Timestamp anzeigen
+                st.markdown(f'<div class="message-timestamp">{response_time.strftime("%H:%M")}</div>', 
+                           unsafe_allow_html=True)
+                
+            except Exception as e:
+                typing_placeholder.empty()
+                error_msg = f"❌ Entschuldigung, es gab einen Fehler: {str(e)}"
+                st.error(error_msg)
+                
+                # Error zur History hinzufügen
+                error_time = datetime.now()
+                st.session_state.chat_history.append({
+                    "role": "assistant", 
+                    "content": error_msg,
+                    "timestamp": error_time.isoformat()
+                })
+        
+        # Auto-scroll zum Ende
+        st.markdown("""
+        <script>
+        setTimeout(function() {
+            // Scroll to bottom of the page
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        }, 200);
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Rerun für bessere UX
+        st.rerun()
+    
+    # Chat Export Funktionalität (nur wenn Chat vorhanden)
+    if st.session_state.chat_history:
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            # Chat Export
+            chat_export = f"# Chat Export - {selected_collection}\n\n"
+            chat_export += f"Exportiert am: {datetime.now().strftime('%d.%m.%Y um %H:%M')}\n\n"
             
-            # Assistant Response
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 Durchsuche Wissensdatenbank..."):
+            for msg in st.session_state.chat_history:
+                role = "**Du**" if msg["role"] == "user" else "**Assistant**"
+                timestamp = ""
+                if "timestamp" in msg:
                     try:
-                        response = generate_rag_response(prompt, selected_collection, chroma_client)
-                        st.markdown(response)
-                        st.session_state.chat_history.append({"role": "assistant", "content": response})
-                    except Exception as e:
-                        error_msg = f"❌ Entschuldigung, es gab einen Fehler: {str(e)}"
-                        st.error(error_msg)
-                        st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
+                        ts = datetime.fromisoformat(msg["timestamp"])
+                        timestamp = f" _{ts.strftime('%H:%M')}_"
+                    except:
+                        pass
+                
+                chat_export += f"{role}{timestamp}:\n{msg['content']}\n\n---\n\n"
+            
+            st.download_button(
+                label="📥 Chat exportieren",
+                data=chat_export,
+                file_name=f"chat_{selected_collection}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                mime="text/markdown",
+                help="Exportiere den Chat als Markdown-Datei"
+            )
         
-        # Chat Reset
-        if st.button("🗑️ Chat zurücksetzen"):
-            st.session_state.chat_history = []
-            st.rerun()
+        with col2:
+            # Chat Statistiken
+            total_chars = sum(len(msg["content"]) for msg in st.session_state.chat_history)
+            st.metric("📊 Zeichen", f"{total_chars:,}")
+        
+        with col3:
+            # Letzte Aktivität
+            if st.session_state.chat_history:
+                last_msg = st.session_state.chat_history[-1]
+                if "timestamp" in last_msg:
+                    try:
+                        last_time = datetime.fromisoformat(last_msg["timestamp"])
+                        st.caption(f"🕒 Letzte Nachricht: {last_time.strftime('%H:%M')}")
+                    except:
+                        pass
 
 def generate_rag_response(question: str, collection_name: str, chroma_client) -> str:
     """Generiere RAG-Antwort."""
