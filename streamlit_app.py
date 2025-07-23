@@ -345,15 +345,31 @@ def main():
                                     )
                                     
                                     if results['documents'] and results['documents'][0]:
-                                        # Import der verbesserten RAG-Funktion
-                                        from insert_docs_streamlit import generate_rag_response
+                                        # Import des originalen Pydantic AI RAG Agents
+                                        from rag_agent import run_rag_agent_entrypoint, RAGDeps
                                         
-                                        # Intelligente RAG-Antwort generieren
-                                        response = generate_rag_response(
-                                            query=prompt,
-                                            search_results=results,
-                                            collection_name=selected_collection
+                                        # Setup RAG Dependencies
+                                        vertex_project_id = st.secrets.get("GOOGLE_CLOUD_PROJECT")
+                                        vertex_location = st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+                                        
+                                        deps = RAGDeps(
+                                            chroma_client=chroma_client,
+                                            collection_name=selected_collection,
+                                            embedding_model_name="text-multilingual-embedding-002",
+                                            embedding_provider="vertex_ai",
+                                            vertex_project_id=vertex_project_id,
+                                            vertex_location=vertex_location,
+                                            use_vertex_reranker=False,  # Kann später aktiviert werden
+                                            vertex_reranker_model=None
                                         )
+                                        
+                                        # Verwende den originalen Pydantic AI RAG Agent (synchron)
+                                        with st.spinner("Generiere intelligente Antwort mit HyDE + Gemini..."):
+                                            response = asyncio.run(run_rag_agent_entrypoint(
+                                                question=prompt,
+                                                deps=deps,
+                                                llm_model="gemini-2.5-flash"
+                                            ))
                                         
                                         st.markdown(response)
                                         

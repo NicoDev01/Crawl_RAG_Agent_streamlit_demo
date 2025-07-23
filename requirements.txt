@@ -19,6 +19,11 @@ openai==1.76.2
 pydantic==2.11.4
 pydantic-ai==0.1.8
 
+# RAG Agent Dependencies
+logfire
+google-cloud-discoveryengine
+google-generativeai
+
 # Utility Dependencies
 python-dotenv==1.1.0
 requests==2.32.3
