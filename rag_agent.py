@@ -326,7 +326,7 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         collection_embedding_dim = None
         try:
             sample = collection.get(limit=1, include=["embeddings"])
-            if sample["embeddings"] and len(sample["embeddings"]) > 0:
+            if sample["embeddings"] is not None and len(sample["embeddings"]) > 0:
                 collection_embedding_dim = len(sample["embeddings"][0])
                 print(f"---> Detected collection embedding dimension: {collection_embedding_dim}")
         except Exception as e:
@@ -472,7 +472,7 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
         collection_embedding_dim = None
         try:
             sample = collection.get(limit=1, include=["embeddings"])
-            if sample["embeddings"] and len(sample["embeddings"]) > 0:
+            if sample["embeddings"] is not None and len(sample["embeddings"]) > 0:
                 collection_embedding_dim = len(sample["embeddings"][0])
                 print(f"---> Detected collection embedding dimension: {collection_embedding_dim}")
         except Exception as e:
