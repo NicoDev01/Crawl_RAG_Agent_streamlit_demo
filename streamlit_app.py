@@ -137,54 +137,133 @@ def create_knowledge_base(crawler_client, chroma_client):
     st.markdown("""
     <div class="feature-card">
         <h3>📖 Neue Wissensdatenbank erstellen</h3>
-        <p>Füge eine Website-URL hinzu und erstelle eine durchsuchbare Wissensdatenbank</p>
+        <p>Erstelle eine durchsuchbare Wissensdatenbank aus Webseiten-Inhalten. Wähle die richtige Konfiguration für optimale Ergebnisse!</p>
     </div>
     """, unsafe_allow_html=True)
     
+    # Hilfe-Sektion
+    with st.expander("💡 Hilfe: Welche Einstellungen soll ich wählen?"):
+        st.markdown("""
+        **🎯 Crawling-Typen erklärt:**
+        
+        - **📄 Einzelne Webseite**: Crawlt nur die angegebene URL
+        - **🔗 Mehrere Seiten**: Folgt Links von der Startseite (konfigurierbare Tiefe)
+        - **🗺️ Sitemap**: Crawlt alle URLs aus einer sitemap.xml Datei
+        
+        **⚙️ Wichtige Parameter:**
+        
+        - **Crawling-Tiefe**: Wie tief sollen Links verfolgt werden? (1 = nur Startseite, 2 = + verlinkte Seiten, etc.)
+        - **Max. Seiten**: Begrenze die Anzahl der Seiten um Kosten und Zeit zu sparen
+        - **Chunk-Größe**: Kleinere Chunks (800-1200) = präzisere Antworten, Größere Chunks (1500-2000) = mehr Kontext
+        
+        **💰 Tipp**: Starte mit wenigen Seiten (5-10) zum Testen, bevor du große Websites crawlst!
+        """)
+    
     with st.form("knowledge_creation"):
-        col1, col2 = st.columns([2, 1])
+        # Basis-Konfiguration
+        st.subheader("🌐 Website-Konfiguration")
+        
+        col1, col2 = st.columns([3, 2])
         
         with col1:
             url = st.text_input(
-                "🌐 Website URL:",
-                placeholder="https://example.com",
-                help="URL einer Webseite oder Sitemap"
+                "Website URL:",
+                placeholder="https://docs.example.com oder https://example.com/sitemap.xml",
+                help="Vollständige URL der Website oder Sitemap"
             )
             
             name = st.text_input(
-                "📝 Name der Wissensdatenbank:",
-                placeholder="Meine Wissensdatenbank",
-                help="Eindeutiger Name für deine Wissensdatenbank"
+                "Name der Wissensdatenbank:",
+                placeholder="z.B. 'Produktdokumentation' oder 'Firmen-Wiki'",
+                help="Eindeutiger Name zur Identifikation deiner Wissensdatenbank"
             )
         
         with col2:
             source_type = st.selectbox(
-                "📄 Typ:",
-                ["Einzelne Webseite", "Sitemap", "Mehrere Seiten"],
-                help="Wähle den Typ der Quelle"
+                "Crawling-Typ:",
+                ["Einzelne Webseite", "Mehrere Seiten", "Sitemap"],
+                help="Bestimmt, wie die Website durchsucht wird"
             )
-            
-            if source_type == "Mehrere Seiten":
-                max_pages = st.number_input("Max. Seiten:", 1, 50, 10)
-            else:
-                max_pages = 1
         
-        # Erweiterte Optionen (eingeklappt)
-        with st.expander("⚙️ Erweiterte Einstellungen"):
+        # Dynamische Konfiguration basierend auf Typ
+        st.subheader("⚙️ Crawling-Einstellungen")
+        
+        if source_type == "Einzelne Webseite":
+            st.info("📄 Crawlt nur die angegebene URL - schnell und präzise")
+            max_depth = 1
+            max_pages = 1
+            
+        elif source_type == "Mehrere Seiten":
+            st.warning("🔗 Folgt Links von der Startseite - kann viele Seiten finden!")
+            
             col3, col4 = st.columns(2)
             with col3:
-                chunk_size = st.slider("Chunk-Größe:", 500, 2000, 1200, 
-                                     help="Größere Chunks = mehr Kontext, kleinere = präziser")
+                max_depth = st.slider(
+                    "Crawling-Tiefe:",
+                    min_value=1, max_value=4, value=2,
+                    help="1 = nur Startseite, 2 = + direkt verlinkte Seiten, 3 = + deren Links, etc."
+                )
             with col4:
-                auto_reduce = st.checkbox("Automatische Optimierung", value=True,
-                                        help="Optimiert automatisch für beste Performance")
+                max_pages = st.number_input(
+                    "Max. Seiten:",
+                    min_value=1, max_value=100, value=20,
+                    help="Begrenze die Anzahl der Seiten um Zeit und Kosten zu sparen"
+                )
+            
+            # Warnung bei hohen Werten
+            if max_depth > 2 or max_pages > 50:
+                st.warning("⚠️ Hohe Werte können zu langen Ladezeiten und hohen Kosten führen!")
+                
+        elif source_type == "Sitemap":
+            st.success("🗺️ Crawlt alle URLs aus der Sitemap - Anzahl wird automatisch erkannt")
+            max_depth = 1
+            max_pages = None
+            
+            st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
+        
+        # Erweiterte Einstellungen
+        with st.expander("🔧 Erweiterte Einstellungen"):
+            col5, col6 = st.columns(2)
+            
+            with col5:
+                chunk_size = st.slider(
+                    "Text-Chunk-Größe:",
+                    min_value=500, max_value=2500, value=1200,
+                    help="Kleinere Chunks = präzisere Antworten, Größere = mehr Kontext pro Antwort"
+                )
+                
+                # Chunk-Größe Empfehlung
+                if chunk_size < 800:
+                    st.info("📝 Kleine Chunks: Sehr präzise, aber möglicherweise wenig Kontext")
+                elif chunk_size > 1800:
+                    st.info("📚 Große Chunks: Viel Kontext, aber möglicherweise weniger präzise")
+                else:
+                    st.success("✅ Optimale Chunk-Größe für die meisten Anwendungen")
+            
+            with col6:
+                auto_reduce = st.checkbox(
+                    "Automatische Optimierung",
+                    value=True,
+                    help="Reduziert automatisch die Datenmenge bei Memory-Problemen"
+                )
+                
+                max_concurrent = st.slider(
+                    "Parallele Prozesse:",
+                    min_value=1, max_value=10, value=5,
+                    help="Mehr Prozesse = schneller, aber höhere Serverlast"
+                )
+        
+        # Geschätzte Kosten/Zeit
+        if source_type == "Mehrere Seiten":
+            estimated_time = max_pages * 2  # Grobe Schätzung: 2 Sekunden pro Seite
+            st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seiten")
         
         submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
         
         if submitted and url and name:
-            create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client)
+            create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
 
-def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client):
+def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth=2, max_concurrent=5):
     """Prozess der Wissensdatenbank-Erstellung."""
     
     # Progress Container
@@ -210,13 +289,13 @@ def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size,
             
             # Konfiguration basierend auf Typ
             if source_type == "Sitemap":
-                max_depth = 1
+                depth = 1
                 limit = None
             elif source_type == "Mehrere Seiten":
-                max_depth = 2
+                depth = max_depth
                 limit = max_pages
             else:
-                max_depth = 1
+                depth = 1
                 limit = 1
             
             # Ingestion ausführen
@@ -227,7 +306,8 @@ def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size,
                 chroma_client=chroma_client,
                 chunk_size=chunk_size,
                 chunk_overlap=150,
-                max_depth=max_depth,
+                max_depth=depth,
+                max_concurrent=max_concurrent,
                 limit=limit,
                 progress=progress,
                 auto_reduce=auto_reduce,
