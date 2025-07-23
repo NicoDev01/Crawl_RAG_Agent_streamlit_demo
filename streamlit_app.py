@@ -334,11 +334,14 @@ def main():
                         with st.chat_message("assistant"):
                             with st.spinner("Suche in der Wissensdatenbank..."):
                                 try:
-                                    # Einfache Suche in ChromaDB
-                                    results = collection.query(
-                                        query_texts=[prompt],
-                                        n_results=5,
-                                        include=['documents', 'metadatas']
+                                    # Import der Query-Funktion mit korrekten Embeddings
+                                    from insert_docs_streamlit import query_collection_sync
+                                    
+                                    # Suche mit korrekten Embedding-Dimensionen
+                                    results = query_collection_sync(
+                                        collection=collection,
+                                        query_text=prompt,
+                                        n_results=5
                                     )
                                     
                                     if results['documents'] and results['documents'][0]:

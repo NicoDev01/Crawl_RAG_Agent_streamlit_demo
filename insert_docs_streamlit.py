@@ -608,6 +608,96 @@ async def run_ingestion_with_modal(
             progress.status_text.text(f"❌ {error_msg}")
         raise e
 
+# RAG Query-Funktion mit korrekten Embeddings
+async def query_collection_with_embeddings(
+    collection,
+    query_text: str,
+    n_results: int = 5
+) -> Dict[str, Any]:
+    """
+    Query eine Collection mit den korrekten Embedding-Dimensionen.
+    Verwendet Vertex AI Embeddings falls verfügbar, sonst ChromaDB Default.
+    """
+    try:
+        # Prüfe, ob Vertex AI verfügbar ist
+        vertex_project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or st.secrets.get("GOOGLE_CLOUD_PROJECT")
+        vertex_location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1") or st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        
+        query_embeddings = None
+        
+        if vertex_project_id and vertex_project_id != "your-gcp-project-id":
+            try:
+                # Setup Google Cloud Credentials falls noch nicht geschehen
+                if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+                    creds_json_b64 = st.secrets.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+                    if creds_json_b64:
+                        import base64
+                        import tempfile
+                        creds_json = base64.b64decode(creds_json_b64).decode('utf-8')
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w') as temp:
+                            temp.write(creds_json)
+                            temp_filename = temp.name
+                        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_filename
+                
+                # Embedding-Modell konfigurieren
+                embedding_model = os.environ.get("VERTEX_EMBEDDING_MODEL", "text-multilingual-embedding-002")
+                if hasattr(st, 'secrets') and st.secrets.get("VERTEX_EMBEDDING_MODEL"):
+                    embedding_model = st.secrets.get("VERTEX_EMBEDDING_MODEL")
+                
+                print(f"Generating query embedding with Vertex AI model: {embedding_model}")
+                
+                # Vertex AI für Query initialisieren
+                init_vertex_ai(project_id=vertex_project_id, location=vertex_location)
+                
+                # Query-Embedding generieren
+                from vertex_ai_utils import get_vertex_text_embedding
+                query_embedding = await asyncio.to_thread(
+                    get_vertex_text_embedding,
+                    text=query_text,
+                    model_name=embedding_model,
+                    task_type="RETRIEVAL_QUERY",  # Wichtig: QUERY statt DOCUMENT
+                    project_id=vertex_project_id,
+                    location=vertex_location
+                )
+                
+                if query_embedding:
+                    query_embeddings = [query_embedding]
+                    print(f"Generated Vertex AI query embedding with {len(query_embedding)} dimensions")
+                else:
+                    print("Vertex AI query embedding failed, falling back to ChromaDB default")
+                    
+            except Exception as e:
+                print(f"Vertex AI query embedding failed: {e}")
+                st.warning(f"⚠️ Vertex AI Query-Embedding fehlgeschlagen, verwende ChromaDB Default")
+        
+        # Query ausführen
+        if query_embeddings:
+            # Mit Vertex AI Embeddings
+            results = collection.query(
+                query_embeddings=query_embeddings,
+                n_results=n_results,
+                include=['documents', 'metadatas', 'distances']
+            )
+            print("Query executed with Vertex AI embeddings")
+        else:
+            # Mit ChromaDB Default Embeddings
+            results = collection.query(
+                query_texts=[query_text],
+                n_results=n_results,
+                include=['documents', 'metadatas', 'distances']
+            )
+            print("Query executed with ChromaDB default embeddings")
+        
+        return results
+        
+    except Exception as e:
+        print(f"Query failed: {e}")
+        raise e
+
+def query_collection_sync(collection, query_text: str, n_results: int = 5) -> Dict[str, Any]:
+    """Synchroner Wrapper für query_collection_with_embeddings."""
+    return asyncio.run(query_collection_with_embeddings(collection, query_text, n_results))
+
 # Synchroner Wrapper für Streamlit
 def run_ingestion_sync(
     url: str,
