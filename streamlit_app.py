@@ -312,13 +312,26 @@ def main():
                 # Collection Info anzeigen
                 if selected_collection:
                     collection = chroma_client.get_collection(selected_collection)
-                    doc_count = collection.count()
+                    chunk_count = collection.count()
                     
-                    col1, col2 = st.columns(2)
+                    # Versuche die Anzahl der ursprünglichen Dokumente zu ermitteln
+                    try:
+                        sample_metadata = collection.get(limit=chunk_count, include=["metadatas"])
+                        unique_urls = set()
+                        for metadata in sample_metadata["metadatas"]:
+                            if metadata and "url" in metadata:
+                                unique_urls.add(metadata["url"])
+                        doc_count = len(unique_urls)
+                    except:
+                        doc_count = "Unbekannt"
+                    
+                    col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Collection", selected_collection)
                     with col2:
                         st.metric("Dokumente", doc_count)
+                    with col3:
+                        st.metric("Chunks", chunk_count)
                     
                     # Chat Interface
                     st.subheader("💬 Chat")

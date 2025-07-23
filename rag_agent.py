@@ -312,7 +312,7 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         print(f"Error generating hypothetical answer: {e}. Falling back to original query.")
 
     # --- Initial Retrieval Step --- 
-    initial_n_results = max(25, n_results * 2)
+    initial_n_results = max(50, n_results * 3)  # Mehr Kandidaten für besseres Retrieval
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
     # Intelligente Embedding-Auswahl basierend auf Collection-Typ
@@ -458,7 +458,7 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
         print(f"Error generating hypothetical answer: {e}. Falling back to original query.")
 
     # --- Initial Retrieval Step --- 
-    initial_n_results = 25
+    initial_n_results = 50  # Erhöhe die Anzahl der initialen Kandidaten
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
     # Intelligente Embedding-Auswahl basierend auf Collection-Typ
@@ -523,6 +523,14 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
             
         if not results or not results.get('ids') or not results['ids'][0]:
              return "No relevant context found."
+             
+        # Debug: Zeige gefundene Chunks für bessere Diagnose
+        print(f"---> Found {len(results['documents'][0])} chunks for Gemini")
+        for i, (doc, metadata) in enumerate(zip(results['documents'][0][:3], results['metadatas'][0][:3])):
+            url = metadata.get('url', 'No URL')
+            preview = doc[:150].replace('\n', ' ')
+            print(f"  [{i+1}] {url}: {preview}...")
+            
     except Exception as e:
         raise RetrievalError(f"Failed to retrieve documents from ChromaDB: {e}") from e
 
