@@ -216,12 +216,13 @@ def create_knowledge_base(crawler_client, chroma_client):
             
             url_validator = st.session_state.url_validator
             
-            # URL input with real-time validation
+            # URL input with real-time validation (Enter soll NICHT submitten)
             url = st.text_input(
                 "Website URL: *",
                 placeholder="https://docs.example.com oder https://example.com/sitemap.xml",
                 help="Vollständige URL der Website oder Sitemap (Pflichtfeld)",
-                key="main_url_input"
+                key="main_url_input",
+                on_change=None  # Verhindert Auto-Submit bei Enter
             )
             
             # Real-time URL validation feedback
@@ -267,6 +268,9 @@ def create_knowledge_base(crawler_client, chroma_client):
                         # Zeige Grund für die Erkennung
                         if "recommended_reason" in detected_method.settings:
                             st.caption(f"💡 {detected_method.settings['recommended_reason']}")
+                        
+                        # Benutzerführung
+                        st.success("👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
                     else:
                         st.error(f"{status_indicator} URL Status: Ungültig")
                         st.session_state.detected_crawling_method = None
@@ -286,11 +290,10 @@ def create_knowledge_base(crawler_client, chroma_client):
             
             with col3:
                 if detected_method.method in ["website", "documentation"]:
-                    # Rekursive Crawling-Einstellungen
-                    default_depth = detected_method.settings.get("max_depth", 2)
+                    # Rekursive Crawling-Einstellungen (Default auf 1)
                     max_depth = st.slider(
                         "Crawling-Tiefe:",
-                        min_value=1, max_value=4, value=default_depth,
+                        min_value=1, max_value=4, value=1,  # Immer Default 1
                         help="Wie tief sollen Links verfolgt werden?"
                     )
                     
@@ -318,12 +321,11 @@ def create_knowledge_base(crawler_client, chroma_client):
                     st.metric("Seiten-Anzahl", "1", help="Nur die angegebene Seite")
                     
                 else:
-                    # Website/Documentation Crawling
-                    default_limit = detected_method.settings.get("limit", 20)
+                    # Website/Documentation Crawling (Default auf 1)
                     max_pages = st.number_input(
                         "Maximale Seitenzahl:",
                         min_value=1, max_value=100, 
-                        value=default_limit,
+                        value=1,  # Immer Default 1
                         help="Maximale Anzahl zu crawlender Seiten"
                     )
                     
@@ -340,8 +342,8 @@ def create_knowledge_base(crawler_client, chroma_client):
         else:
             # Fallback wenn keine URL eingegeben
             st.info("💡 Gib eine URL ein, um optimale Crawling-Einstellungen zu erhalten")
-            max_depth = 2
-            max_pages = 10
+            max_depth = 1  # Default auf 1
+            max_pages = 1   # Default auf 1
         
         # Erweiterte Einstellungen
         with st.expander("🔧 Erweiterte Einstellungen"):
