@@ -21,6 +21,7 @@ from crawler_client import CrawlerClient
 # UX Components Import
 from ux_components import URLValidator
 from state_manager import get_state_manager
+from url_detection import detect_url_type, URLDetector
 
 # Windows Event Loop Policy
 if sys.platform == 'win32':
@@ -176,28 +177,30 @@ def create_knowledge_base(crawler_client, chroma_client):
         return
     
     # Hilfe-Sektion
-    with st.expander("💡 Hilfe: Welche Einstellungen soll ich wählen?"):
+    with st.expander("💡 Hilfe: Unterstützte URL-Typen und Einstellungen"):
         st.markdown("""
-        **🎯 Crawling-Typen erklärt:**
+        **🎯 Automatisch erkannte URL-Typen:**
         
-        - **🌐 Website Crawling**: Crawlt Webseiten mit konfigurierbarer Tiefe und Seitenzahl
-        - **🗺️ Sitemap**: Crawlt alle URLs aus einer sitemap.xml Datei automatisch
+        • **🌐 Website-URLs** → Rekursives Crawling  
+          `https://docs.example.com`, `https://example.com/help`
+          
+        • **🗺️ Sitemap-URLs** → Automatisches Parsing  
+          `https://example.com/sitemap.xml`, `https://site.com/sitemap_index.xml`
+          
+        • **📄 Einzelseiten** → Direkte Extraktion  
+          `https://example.com/page.html`, `https://site.com/document.pdf`
+          
+        • **📚 Dokumentations-Sites** → Tiefgehende Analyse  
+          `https://docs.example.com`, `https://help.example.com`
         
-        **⚙️ Parameter im Detail:**
+        **⚙️ Intelligente Einstellungen:**
         
-        - **Crawling-Tiefe**: Technisch gesehen die Rekursionstiefe beim Verfolgen von Links (1 = keine Rekursion, 2 = eine Ebene tief, etc.)
-        - **Max. Seiten**: Technische Begrenzung der zu crawlenden URLs um Ressourcen zu schonen
-        - **Chunk-Größe**: Technische Textaufteilung - kleinere Chunks (800-1200) für präzise Suche, größere (1500-2000) für mehr Kontext
-        - **Parallele Prozesse**: Technische Parallelisierung - höhere Werte bedeuten mehr gleichzeitige Crawling-Threads
+        - **Crawling-Tiefe**: Automatisch optimiert je nach Website-Typ
+        - **Seitenlimits**: Empfohlene Werte basierend auf URL-Analyse  
+        - **Chunk-Größe**: Textaufteilung für optimale Suche (800-1200 = präzise, 1500-2000 = mehr Kontext)
+        - **Parallelisierung**: Automatisch angepasst an Website-Typ
         
-        **💰 Kostentipp**: Starte mit wenigen Seiten (5-10) zum Testen, bevor du große Websites crawlst!
-        
-        **🔧 Empfohlene Einstellungen:**
-        
-        - **Einzelne Seite testen**: Tiefe=1, Seiten=1
-        - **Kleine Website**: Tiefe=2, Seiten=10-20  
-        - **Große Website**: Tiefe=2-3, Seiten=50+ (Vorsicht bei Kosten!)
-        - **Vollständige Website**: Sitemap verwenden (automatische Erkennung)
+        **💡 Das System erkennt automatisch den besten Crawling-Typ und stellt optimale Einstellungen bereit!**
         """)
     
     with st.form("knowledge_creation"):
@@ -241,14 +244,9 @@ def create_knowledge_base(crawler_client, chroma_client):
             )
         
         with col2:
-            source_type = st.selectbox(
-                "Crawling-Typ:",
-                ["Website Crawling", "Sitemap"],
-                help="Website Crawling = konfigurierbare Tiefe und Seitenzahl, Sitemap = automatische Erkennung aller URLs"
-            )
-            
-            # URL Status Indicator (nur bei Eingabe)
+            # Intelligente URL-Typ-Erkennung
             if url and url.strip():
+                # URL-Validierung
                 url_validation = getattr(st.session_state, 'url_validation_result', None)
                 if url_validation:
                     status_indicator = url_validator.get_validation_status_indicator(url_validation)
@@ -258,67 +256,92 @@ def create_knowledge_base(crawler_client, chroma_client):
                             st.warning(f"{status_indicator} URL Status: Gültig mit Warnung")
                         else:
                             st.success(f"{status_indicator} URL Status: Gültig")
+                        
+                        # Intelligente Typ-Erkennung
+                        detected_method = detect_url_type(url)
+                        st.session_state.detected_crawling_method = detected_method
+                        
+                        # Zeige erkannten Typ
+                        st.info(f"✨ {detected_method.icon} **{detected_method.description}**")
+                        
+                        # Zeige Grund für die Erkennung
+                        if "recommended_reason" in detected_method.settings:
+                            st.caption(f"💡 {detected_method.settings['recommended_reason']}")
                     else:
                         st.error(f"{status_indicator} URL Status: Ungültig")
+                        st.session_state.detected_crawling_method = None
+            else:
+                st.session_state.detected_crawling_method = None
 
         
-        # Crawling-Einstellungen für alle Typen
+        # Intelligente Crawling-Einstellungen
         st.subheader("⚙️ Crawling-Einstellungen")
         
-        # Typ-spezifische Informationen (nur für Sitemap)
-        if source_type == "Sitemap":
-            st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
+        # Hole erkannte Methode
+        detected_method = getattr(st.session_state, 'detected_crawling_method', None)
         
-        # Gemeinsame Crawling-Einstellungen für alle Typen
-        col3, col4 = st.columns(2)
-        
-        with col3:
-            if source_type == "Website Crawling":
-                max_depth = st.slider(
-                    "Wie tief soll gecrawlt werden?",
-                    min_value=1, max_value=4, value=1,
-                    help="Technisch: Maximale Rekursionstiefe beim Verfolgen von Links (1 = keine Rekursion, 2 = eine Ebene tief, etc.)"
-                )
-                
-                # Einfache Erklärung der Tiefe
-                if max_depth == 1:
-                    st.caption("🎯 Nur die angegebene URL wird gecrawlt")
-                elif max_depth == 2:
-                    st.caption("🎯 Angegebene URL + alle direkt verlinkten Seiten")
-                elif max_depth == 3:
-                    st.caption("🎯 Tiefes Crawling: Folgt Links 2 Ebenen tief")
+        if detected_method:
+            # Zeige optimale Einstellungen basierend auf erkanntem Typ
+            col3, col4 = st.columns(2)
+            
+            with col3:
+                if detected_method.method in ["website", "documentation"]:
+                    # Rekursive Crawling-Einstellungen
+                    default_depth = detected_method.settings.get("max_depth", 2)
+                    max_depth = st.slider(
+                        "Crawling-Tiefe:",
+                        min_value=1, max_value=4, value=default_depth,
+                        help="Wie tief sollen Links verfolgt werden?"
+                    )
+                    
+                    # Dynamische Erklärung basierend auf Typ
+                    if detected_method.method == "documentation":
+                        st.caption("📚 Dokumentations-Websites profitieren von tieferem Crawling")
+                    else:
+                        st.caption("🌐 Standard Website-Crawling")
+                        
+                elif detected_method.method == "sitemap":
+                    max_depth = 1
+                    st.info("🗺️ Sitemap-Crawling: Tiefe automatisch auf 1 gesetzt")
+                    
+                else:  # single
+                    max_depth = 1
+                    st.info("📄 Einzelseite: Keine Tiefe erforderlich")
+            
+            with col4:
+                if detected_method.method == "sitemap":
+                    max_pages = None
+                    st.metric("Seiten-Limit", "Automatisch", help="Alle URLs aus der Sitemap")
+                    
+                elif detected_method.method == "single":
+                    max_pages = 1
+                    st.metric("Seiten-Anzahl", "1", help="Nur die angegebene Seite")
+                    
                 else:
-                    st.caption("🎯 Sehr tiefes Crawling: Kann sehr viele Seiten finden!")
-            else:
-                max_depth = 1
-                st.info("Tiefe wird bei Sitemaps automatisch auf 1 gesetzt")
-        
-        with col4:
-            if source_type == "Sitemap":
-                st.info("Bei Sitemaps wird die Anzahl der Seiten automatisch erkannt")
-                max_pages = None
-                st.metric("Seiten-Limit", "Automatisch")
-            else:
-                max_pages = st.number_input(
-                    "Wie viele Seiten maximal crawlen?",
-                    min_value=1, max_value=100, 
-                    value=1,
-                    help="Technisch: Maximale Anzahl zu crawlender URLs um Ressourcen zu schonen"
-                )
+                    # Website/Documentation Crawling
+                    default_limit = detected_method.settings.get("limit", 20)
+                    max_pages = st.number_input(
+                        "Maximale Seitenzahl:",
+                        min_value=1, max_value=100, 
+                        value=default_limit,
+                        help="Maximale Anzahl zu crawlender Seiten"
+                    )
+                    
+                    # Dynamische Empfehlungen
+                    if detected_method.method == "documentation":
+                        st.caption("📚 Dokumentations-Sites: Höhere Limits empfohlen")
+                    else:
+                        st.caption("🌐 Standard-Limits für Website-Crawling")
+            
+            # Warnung bei hohen Werten
+            if detected_method.method in ["website", "documentation"] and (max_depth > 3 or (max_pages and max_pages > 50)):
+                st.warning("⚠️ Hohe Werte können zu langen Ladezeiten führen!")
                 
-                # Einfache Erklärung der Seitenzahl
-                if max_pages == 1:
-                    st.caption("🎯 Nur eine Seite wird gecrawlt")
-                elif max_pages <= 10:
-                    st.caption("🎯 Kleine Anzahl - gut zum Testen")
-                elif max_pages <= 50:
-                    st.caption("🎯 Mittlere Anzahl - für normale Websites")
-                else:
-                    st.caption("🎯 Große Anzahl - kann teuer werden!")
-        
-        # Warnung bei hohen Werten (für Website Crawling)
-        if source_type == "Website Crawling" and (max_depth > 2 or (max_pages and max_pages > 50)):
-            st.warning("⚠️ Hohe Werte können zu langen Ladezeiten und hohen Kosten führen!")
+        else:
+            # Fallback wenn keine URL eingegeben
+            st.info("💡 Gib eine URL ein, um optimale Crawling-Einstellungen zu erhalten")
+            max_depth = 2
+            max_pages = 10
         
         # Erweiterte Einstellungen
         with st.expander("🔧 Erweiterte Einstellungen"):
@@ -352,17 +375,20 @@ def create_knowledge_base(crawler_client, chroma_client):
                     help="Mehr Prozesse = schneller, aber höhere Serverlast"
                 )
         
-        # Geschätzte Kosten/Zeit für alle Typen
-        if source_type == "Website Crawling" and max_pages:
-            if max_depth > 1:
-                estimated_pages = min(max_pages, 10 ** (max_depth - 1) * 5)  # Grobe Schätzung
-                estimated_time = estimated_pages * 2  # Grobe Schätzung: 2 Sekunden pro Seite
-                st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für ca. {estimated_pages} Seiten")
-            else:
-                estimated_time = max_pages * 2
-                st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seite(n)")
-        elif source_type == "Sitemap":
-            st.info("⏱️ Geschätzte Dauer: Abhängig von der Anzahl der URLs in der Sitemap")
+        # Intelligente Zeitschätzung basierend auf erkanntem Typ
+        if detected_method:
+            if detected_method.method == "sitemap":
+                st.info("⏱️ Geschätzte Dauer: Abhängig von der Anzahl der URLs in der Sitemap")
+            elif detected_method.method == "single":
+                st.info("⏱️ Geschätzte Dauer: ~5-10 Sekunden für eine Seite")
+            elif detected_method.method in ["website", "documentation"] and max_pages:
+                if max_depth > 1:
+                    estimated_pages = min(max_pages, 10 ** (max_depth - 1) * 3)
+                    estimated_time = estimated_pages * 2
+                    st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für ca. {estimated_pages} Seiten")
+                else:
+                    estimated_time = max_pages * 2
+                    st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seite(n)")
         
         # Form submission with enhanced validation
         submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
@@ -398,9 +424,9 @@ def create_knowledge_base(crawler_client, chroma_client):
                 st.session_state.processing = True
                 
                 # Proceed with knowledge base creation
-                create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
+                create_knowledge_base_process(url, name, detected_method, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
 
-def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth=2, max_concurrent=5):
+def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth=2, max_concurrent=5):
     """Prozess der Wissensdatenbank-Erstellung."""
     
     # Leere die Seite und zeige nur Progress
@@ -426,16 +452,16 @@ def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size,
             
             progress = UserProgress()
             
-            # Konfiguration basierend auf Typ
-            if source_type == "Sitemap":
+            # Konfiguration basierend auf intelligenter Erkennung
+            if detected_method and detected_method.method == "sitemap":
                 depth = 1
                 limit = None
-            elif source_type == "Website Crawling":
-                depth = max_depth
-                limit = max_pages
-            else:
+            elif detected_method and detected_method.method == "single":
                 depth = 1
                 limit = 1
+            else:  # website, documentation
+                depth = max_depth
+                limit = max_pages
             
             # Ingestion ausführen
             result = run_ingestion_sync(
