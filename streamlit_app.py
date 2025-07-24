@@ -253,16 +253,10 @@ def create_knowledge_base(crawler_client, chroma_client):
                     status_indicator = url_validator.get_validation_status_indicator(url_validation)
                     
                     if url_validation.is_valid:
-                        if url_validation.warning_message:
-                            st.warning(f"{status_indicator} URL Status: Gültig mit Warnung - 👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
-                        else:
-                            st.success(f"{status_indicator} URL Status: Gültig - 👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
-                        
                         # Intelligente Typ-Erkennung (nur für interne Logik)
                         detected_method = detect_url_type(url)
                         st.session_state.detected_crawling_method = detected_method
                     else:
-                        st.error(f"{status_indicator} URL Status: Ungültig")
                         st.session_state.detected_crawling_method = None
             else:
                 st.session_state.detected_crawling_method = None

@@ -331,7 +331,7 @@ class URLValidator(BaseUXComponent):
         if result.response_time and result.response_time > 3.0:
             return "🟡", "warning", f"URL erreichbar, aber langsam ({result.response_time:.1f}s)"
         
-        return "🟢", "success", "URL ist gültig und erreichbar"
+        return "🟢", "success", "URL ist gültig und erreichbar - 👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'"
     
     def render_validation_feedback(self, url: str, show_reachability: bool = True, 
                                  container=None, debounced: bool = True) -> ValidationResult:
