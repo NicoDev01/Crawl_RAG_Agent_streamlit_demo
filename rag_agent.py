@@ -4,7 +4,7 @@ import os
 import sys
 import argparse
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict
 from pydantic import BaseModel, Field
 
 # Define structured output model for RAG responses
@@ -73,9 +73,30 @@ async def generate_with_gemini(prompt: str, system_prompt: str = "", project_id:
             top_k=40
         )
         
+        # Safety settings to prevent unnecessary blocking
+        safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH", 
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            }
+        ]
+        
         model = genai.GenerativeModel(
             model_name="gemini-2.5-flash",
-            generation_config=generation_config
+            generation_config=generation_config,
+            safety_settings=safety_settings
         )
         
         # Combine system prompt and user prompt
@@ -83,6 +104,12 @@ async def generate_with_gemini(prompt: str, system_prompt: str = "", project_id:
         
         # Generate response (synchronous call in async wrapper)
         response = await asyncio.to_thread(model.generate_content, full_prompt)
+        
+        # Check if response was blocked by safety filters
+        if not response.candidates or not response.candidates[0].content.parts:
+            finish_reason = response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
+            raise Exception(f"Gemini response blocked by safety filters (finish_reason: {finish_reason})")
+        
         return response.text
         
     except Exception as e:
@@ -139,7 +166,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "4.  **Umgang mit fehlenden Informationen:** Wenn der Kontext die Antwort nicht enthält, MUSST du das klar sagen. Beispiel: 'Die bereitgestellten Dokumente enthalten keine Informationen zu diesem Thema.'\n\n"
     
     "## Antwort-Stil und Formatierung:\n"
-    "- **Redundanz vermeiden:** Keine Quellen-Platzhalter wie '(1)' oder wiederholte Phrasen ('laut Quelle...') im Fließtext. Nutze nur am Ende Kurz-Zitationen mit hochgestellten Zahlen¹.\n"
+    "- **Klickbare Quellenverweise:** Verwende hochgestellte Zahlen als KLICKBARE LINKS im Format [¹](URL), [²](URL) etc. im Fließtext, damit Nutzer direkt zur Quelle springen können.\n"
     "- **Strukturierung:** Nutze prägnante Überschriften. Fasse jeden Aspekt in 1-2 Sätzen zusammen, dann optional ein kurzer Zusatz-Fakt.\n"
     "- **Schreibstil:** Formuliere neutral-sachlich, aber leserfreundlich. Vermeide staccato-artige Stichpunkte, wenn ein zusammenhängender Absatz möglich ist.\n"
     "- **Fazit-Regel:** Schließe mit einem knappen Satz, warum das Wissen praktisch nützt oder welche Fehlvorstellung es korrigiert.\n\n"
@@ -152,17 +179,12 @@ SYSTEM_PROMPT_TEMPLATE = (
     "5.  Verwende hochgestellte Zahlen¹ ² ³ für Quellenverweise im Text (sparsam).\n"
     "6.  Füge am Ende unter '**Quellen:**' nur die tatsächlich verwendeten Quellen auf.\n\n"
     
-    "## Beispiel für korrekte Formatierung:\n"
-    "### Hauptthema\n"
-    "Die wichtigste Information wird hier in 1-2 zusammenhängenden Sätzen erklärt¹. Ein zusätzlicher Fakt kann die Erklärung vertiefen.\n\n"
-    "### Weitere Aspekte\n"
-    "Ergänzende Informationen werden ebenfalls in fließendem Text dargestellt². Stichpunkte nur wenn wirklich nötig:\n"
-    "- Punkt A\n"
-    "- Punkt B\n\n"
-    "**Praktischer Nutzen:** Dieses Wissen hilft dabei, [konkrete Anwendung] zu verstehen.\n\n"
-    "**Quellen:**\n"
-    "¹ https://example.com/quelle1\n"
-    "² https://example.com/quelle2\n\n"
+    "## Formatierungs-Richtlinien:\n"
+    "- **Überschriften:** Verwende ### für Hauptaspekte (z.B. 'Definition', 'Eigenschaften', 'Anwendung')\n"
+    "- **Zitationen:** Setze Quellenverweise als klickbare hyperlinks: [¹](URL), [²](URL) direkt im Text\n"
+    "- **Struktur:** Organisiere Informationen logisch nach Relevanz für die Frage\n"
+    "- **Quellen-Sektion:** Schließe mit '**Quellen:**\n' und liste dadrunter alle verwendeten URLs auf 1) https://example.com/quelle1\n \n"
+    "- **Flexibilität:** Passe Struktur und Inhalt an die spezifische Frage an - nicht jede Antwort braucht dieselben Abschnitte\n\n"
     
     "--- KONTEXT ---\n"
     "{context}\n"
@@ -220,13 +242,22 @@ def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
     
     # Combine context with deduplicated source references at the end
     context_text = "\n\n---\n\n".join(context_parts)
-    references_text = "\n".join(unique_sources)
     
-    # Provide URL mapping for the LLM to use in responses
-    url_mapping_instructions = "ANWEISUNG FÜR ZITATIONEN: Verwende diese hochgestellten Zahlen sparsam im Text:\n"
+    # Create clickable references for the sources section
+    clickable_references = []
     for url, ref_num in url_to_ref_num.items():
         superscript = superscript_map.get(ref_num, f"^{ref_num}")
-        url_mapping_instructions += f"{superscript} = {url}\n"
+        clickable_references.append(f"[{superscript}]({url}) {url}")
+    
+    references_text = "\n".join(clickable_references)
+    
+    # Provide URL mapping for the LLM to use in responses with clickable links
+    url_mapping_instructions = "ANWEISUNG FÜR ZITATIONEN: Verwende diese hochgestellten Zahlen als KLICKBARE LINKS im Text:\n"
+    for url, ref_num in url_to_ref_num.items():
+        superscript = superscript_map.get(ref_num, f"^{ref_num}")
+        url_mapping_instructions += f"[{superscript}]({url}) für {url}\n"
+    
+    url_mapping_instructions += "\nWICHTIG: Verwende im Fließtext das Format [¹](URL), [²](URL) etc. für klickbare Quellenverweise!"
     
     return f"{context_text}\n\n--- QUELLENVERZEICHNIS ---\n{references_text}\n\n--- ZITATIONS-MAPPING ---\n{url_mapping_instructions}"
 
@@ -505,25 +536,218 @@ async def run_rag_agent_entrypoint(
         logfire.exception("Agent execution failed", question=question, model=llm_model)
         raise RuntimeError(f"Agent execution failed: {e}") from e
 
-async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
-    """Helper function to retrieve context for Gemini without RunContext."""
-    print("--- Retrieve Context for Gemini ---")
-    print(f"Original Query: '{question}'")
+async def generate_query_variations(question: str, deps: RAGDeps) -> List[str]:
+    """Generate multiple query variations for better retrieval coverage."""
+    variations = [question]  # Original query
     
-    # --- HyDE Step --- 
-    hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Focus on providing factual information that would typically be found in documentation, articles, or informational content. Question: {question}"
-    hypothetical_answer = question
+    # Generate semantic variations
+    variation_prompt = f"""Generate 3 different ways to ask the same question for better search results. 
+    Make them semantically different but asking for the same information.
+    
+    Original question: {question}
+    
+    Return only the 3 variations, one per line, without numbering or explanation."""
+    
     try:
-        # Use Gemini 2.5 Flash for HyDE
-        hypothetical_answer = await generate_with_gemini(
-            prompt=hyde_prompt,
-            system_prompt="You generate hypothetical answers for RAG retrieval. Create realistic content that could be found in documentation, articles, or informational websites. Be factual and relevant to the specific question asked.",
+        variations_text = await generate_with_gemini(
+            prompt=variation_prompt,
+            system_prompt="You generate query variations for better search coverage. Create semantically different but equivalent questions.",
             project_id=deps.vertex_project_id,
             location=deps.vertex_location
         )
-        print(f"---> Generated Hypothetical Answer: '{hypothetical_answer}'")
+        
+        # Parse variations
+        new_variations = [v.strip() for v in variations_text.split('\n') if v.strip()]
+        variations.extend(new_variations[:3])  # Max 3 additional variations
+        
     except Exception as e:
-        print(f"Error generating hypothetical answer: {e}. Falling back to original query.")
+        print(f"Error generating query variations: {e}. Using original query only.")
+    
+    return variations
+
+async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
+    """Helper function to retrieve context for Gemini with Multi-Query Retrieval."""
+    print("--- Retrieve Context for Gemini (Multi-Query + HyDE) ---")
+    print(f"Original Query: '{question}'")
+    
+    # --- Multi-Query Generation ---
+    print("🔄 Generating query variations...")
+    query_variations = await generate_query_variations(question, deps)
+    print(f"---> Generated {len(query_variations)} query variations")
+    
+    # --- Parallel HyDE + Multi-Query Retrieval ---
+    print("🧠 Generating hypothetical answers for all queries...")
+    
+    async def process_single_query(query: str) -> Tuple[str, str]:
+        """Process a single query with HyDE."""
+        hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Focus on providing factual information that would typically be found in documentation, articles, or informational content. Question: {query}"
+        
+        try:
+            hypothetical_answer = await generate_with_gemini(
+                prompt=hyde_prompt,
+                system_prompt="You generate hypothetical answers for RAG retrieval. Create realistic content that could be found in documentation, articles, or informational websites. Be factual and relevant to the specific question asked.",
+                project_id=deps.vertex_project_id,
+                location=deps.vertex_location
+            )
+            return query, hypothetical_answer
+        except Exception as e:
+            print(f"Error generating hypothetical answer for '{query}': {e}")
+            return query, query  # Fallback to original query
+    
+    # Process all queries in parallel
+    query_hyde_pairs = await asyncio.gather(*[process_single_query(q) for q in query_variations])
+    
+    for original_q, hyde_answer in query_hyde_pairs:
+        print(f"---> HyDE for '{original_q[:50]}...': '{hyde_answer[:100]}...'")
+    
+    # --- Parallel Retrieval for all HyDE answers ---
+    print("🔍 Searching database with all variations...")
+    
+    async def search_single_hyde(hyde_answer: str) -> List[Dict]:
+        """Search ChromaDB with a single HyDE answer."""
+        try:
+            collection = get_or_create_collection(
+                client=deps.chroma_client,
+                collection_name=deps.collection_name
+            )
+            
+            # Detect embedding dimension
+            collection_embedding_dim = None
+            try:
+                sample = collection.get(limit=1, include=["embeddings"])
+                if sample["embeddings"] is not None and len(sample["embeddings"]) > 0:
+                    collection_embedding_dim = len(sample["embeddings"][0])
+            except Exception:
+                pass
+            
+            # Query based on embedding type
+            if collection_embedding_dim == 384:
+                results = collection.query(
+                    query_texts=[hyde_answer],
+                    n_results=20,  # Weniger pro Query, da wir mehrere haben
+                    include=['metadatas', 'documents']
+                )
+            else:
+                query_embedding = get_vertex_text_embedding(
+                    text=hyde_answer,
+                    model_name=deps.embedding_model_name,
+                    task_type="RETRIEVAL_QUERY",
+                    project_id=deps.vertex_project_id,
+                    location=deps.vertex_location
+                )
+                if query_embedding is None:
+                    return []
+                
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=20,
+                    include=['metadatas', 'documents']
+                )
+            
+            if not results or not results.get('ids') or not results['ids'][0]:
+                return []
+            
+            # Convert to list of dicts
+            docs_with_meta = []
+            for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
+                docs_with_meta.append({"document": doc, "metadata": meta})
+            
+            return docs_with_meta
+            
+        except Exception as e:
+            print(f"Error in search_single_hyde: {e}")
+            return []
+    
+    # Execute all searches in parallel
+    all_search_results = await asyncio.gather(*[
+        search_single_hyde(hyde_answer) 
+        for _, hyde_answer in query_hyde_pairs
+    ])
+    
+    # Combine and deduplicate results
+    print("🔗 Combining and deduplicating results...")
+    combined_docs = []
+    seen_docs = set()
+    
+    for search_results in all_search_results:
+        for doc_meta in search_results:
+            doc_text = doc_meta['document']
+            # Simple deduplication based on first 100 characters
+            doc_signature = doc_text[:100]
+            if doc_signature not in seen_docs:
+                seen_docs.add(doc_signature)
+                combined_docs.append(doc_meta)
+    
+    print(f"---> Combined {len(combined_docs)} unique documents from {len(query_variations)} queries")
+    
+    if not combined_docs:
+        return "No relevant context found."
+    
+    # --- Re-ranking Step ---
+    if deps.use_vertex_reranker and deps.vertex_reranker_model:
+        print("⚡ Re-ranking with Vertex AI...")
+        reranked_results = await rerank_with_vertex_ai(
+            query=question,
+            documents=combined_docs,
+            model_name=deps.vertex_reranker_model,
+            top_n=15
+        )
+        final_docs = [item['document'] for item in reranked_results]
+        final_metadatas = [item['metadata'] for item in reranked_results]
+    else:
+        print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
+        # Enhanced fallback filtering
+        filtered_docs = []
+        query_words = set(question.lower().split())
+        
+        # Remove stop words
+        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
+        query_words = query_words - stop_words
+        
+        for doc_meta in combined_docs:
+            doc_text = doc_meta['document'].lower()
+            doc_words = set(doc_text.split()) - stop_words
+            
+            # Multiple relevance criteria
+            word_overlap = len(query_words.intersection(doc_words))
+            
+            # Bonus for exact phrase matches
+            phrase_bonus = 0
+            for word in query_words:
+                if word in doc_text:
+                    phrase_bonus += 2
+            
+            # Bonus for important keywords
+            keyword_bonus = 0
+            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
+            for word in important_words:
+                if word in doc_text and any(w in question.lower() for w in [word, 'definiert', 'definition']):
+                    keyword_bonus += 3
+            
+            # Length bonus
+            length_bonus = min(len(doc_text) / 1000, 1.5)
+            
+            # Penalty for very short docs
+            length_penalty = -2 if len(doc_text) < 100 else 0
+            
+            # Total score
+            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
+            
+            if total_score > 0:
+                filtered_docs.append((doc_meta, total_score))
+        
+        # Sort by score and take top 15
+        filtered_docs.sort(key=lambda x: x[1], reverse=True)
+        top_filtered = filtered_docs[:15]
+        
+        final_docs = [item[0]['document'] for item in top_filtered]
+        final_metadatas = [item[0]['metadata'] for item in top_filtered]
+        
+        print(f"---> Enhanced filtering: {len(final_docs)} most relevant chunks")
+        print(f"---> Top 3 scores: {[f'{item[1]:.1f}' for item in top_filtered[:3]]}")
+
+    print("--- Context Provided to Gemini ---")
+    return _format_context_parts(final_docs, final_metadatas)
 
     # --- Initial Retrieval Step --- 
     initial_n_results = 50  # Mehr Kandidaten für bessere Abdeckung

@@ -11,6 +11,7 @@ import os
 import asyncio
 import base64
 import tempfile
+import time
 from typing import Optional
 from datetime import datetime
 
@@ -583,25 +584,18 @@ def render_improved_chat_interface(chroma_client, selected_collection):
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
     
-    # CSS für verbessertes Chat-Layout mit Auto-Scroll
+    # CSS für verbessertes Chat-Layout
     st.markdown("""
     <style>
-    /* Chat Input fixiert am unteren Rand */
-    .stChatInput {
-        position: sticky !important;
-        bottom: 0 !important;
-        background-color: white !important;
-        padding: 1rem 0 !important;
-        border-top: 2px solid #667eea !important;
-        z-index: 999 !important;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
+    /* Main Container */
+    .main .block-container {
+        padding-bottom: 120px !important;
+        max-width: 100% !important;
     }
     
-    /* Chat Input Field Styling */
-    .stChatInput > div > div > div > div {
-        border-radius: 25px !important;
-        border: 2px solid #667eea !important;
-        box-shadow: 0 2px 5px rgba(102, 126, 234, 0.2) !important;
+    /* Standard Chat Input - minimal styling */
+    .stChatInput {
+        /* Use default Streamlit styling */
     }
     
     /* Chat Messages Container */
@@ -655,6 +649,8 @@ def render_improved_chat_interface(chroma_client, selected_collection):
         0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
         40% { transform: scale(1); opacity: 1; }
     }
+    
+    /* Use default Streamlit status styling */
     
     /* Welcome Message Styling */
     .welcome-message {
@@ -741,27 +737,41 @@ def render_improved_chat_interface(chroma_client, selected_collection):
             st.markdown(f'<div class="message-timestamp">{current_time.strftime("%H:%M")}</div>', 
                        unsafe_allow_html=True)
         
-        # Assistant Response mit Typing Indicator
+        # Kein Progress Container mehr benötigt
+        
+        # Assistant Response
         with st.chat_message("assistant"):
-            # Typing Indicator
-            typing_placeholder = st.empty()
-            typing_placeholder.markdown("""
-            <div class="typing-indicator">
-                <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-                <span>Durchsuche Wissensdatenbank...</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
             try:
-                # RAG Response generieren
-                response = generate_rag_response(prompt, selected_collection, chroma_client)
+                # Status Container für Progress
+                with st.status("🤖 Verarbeite deine Anfrage...", expanded=True) as status:
+                    st.write("🔄 Generiere Frage-Varianten...")
+                    
+                    # RAG Response generieren
+                    from rag_agent import run_rag_agent_entrypoint, RAGDeps
+                    
+                    # Setup RAG Dependencies (ohne Vertex AI Reranker)
+                    deps = RAGDeps(
+                        chroma_client=chroma_client,
+                        collection_name=selected_collection,
+                        embedding_model_name="text-embedding-004",
+                        embedding_provider="default",  # ChromaDB default
+                        vertex_project_id=None,
+                        vertex_location="us-central1",
+                        use_vertex_reranker=False,  # Deaktiviert
+                        vertex_reranker_model=None
+                    )
+                    
+                    st.write("🧠 Erstelle hypothetische Antworten...")
+                    st.write("🔍 Durchsuche Wissensdatenbank...")
+                    
+                    response = asyncio.run(run_rag_agent_entrypoint(
+                        prompt, deps, "gemini-2.5-flash"
+                    ))
+                    
+                    st.write("✅ Antwort generiert!")
+                    status.update(label="✅ Fertig!", state="complete", expanded=False)
                 
-                # Typing Indicator entfernen und Antwort anzeigen
-                typing_placeholder.empty()
+                # Antwort direkt anzeigen
                 st.markdown(response)
                 
                 # Response zur History hinzufügen
@@ -777,7 +787,6 @@ def render_improved_chat_interface(chroma_client, selected_collection):
                            unsafe_allow_html=True)
                 
             except Exception as e:
-                typing_placeholder.empty()
                 error_msg = f"❌ Entschuldigung, es gab einen Fehler: {str(e)}"
                 st.error(error_msg)
                 
@@ -851,6 +860,110 @@ def render_improved_chat_interface(chroma_client, selected_collection):
                         st.caption(f"🕒 Letzte Nachricht: {last_time.strftime('%H:%M')}")
                     except:
                         pass
+
+async def generate_rag_response_with_progress(question: str, collection_name: str, chroma_client, progress_indicator) -> str:
+    """Generate RAG response with detailed progress updates."""
+    from ui_components import ProgressStatus
+    
+    try:
+        # Import des RAG Agents
+        from rag_agent import run_rag_agent_entrypoint, RAGDeps
+        import dotenv
+        dotenv.load_dotenv()
+        
+        # Setup
+        vertex_project_id = (
+            st.secrets.get("GOOGLE_CLOUD_PROJECT") or 
+            os.getenv("GOOGLE_CLOUD_PROJECT") or 
+            "vertexai-408416"
+        )
+        vertex_location = (
+            st.secrets.get("GOOGLE_CLOUD_LOCATION") or 
+            os.getenv("GOOGLE_CLOUD_LOCATION") or 
+            "us-central1"
+        )
+        
+        # Gemini API Key setzen
+        gemini_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            os.environ["GEMINI_API_KEY"] = gemini_key
+        
+        # Google Cloud Credentials für lokale Entwicklung
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            json_files = [f for f in os.listdir('.') if f.startswith('vertexai-') and f.endswith('.json')]
+            if json_files:
+                credentials_path = json_files[0]
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        
+        # Reranker konfigurieren
+        possible_configs = [
+            f"projects/{vertex_project_id}/locations/global/rankingConfigs/default_ranking_config",
+            f"projects/{vertex_project_id}/locations/us-central1/rankingConfigs/default_ranking_config",
+            f"projects/{vertex_project_id}/locations/global/rankingConfigs/default",
+        ]
+        reranker_model = possible_configs[0]
+        
+        # Reranker-Status bestimmen
+        use_vertex_reranker_env = os.getenv("USE_VERTEX_RERANKER", "false").lower() == "true"
+        use_reranker = bool(vertex_project_id) and use_vertex_reranker_env
+        
+        deps = RAGDeps(
+            chroma_client=chroma_client,
+            collection_name=collection_name,
+            embedding_model_name="text-multilingual-embedding-002",
+            embedding_provider="vertex_ai",
+            vertex_project_id=vertex_project_id,
+            vertex_location=vertex_location,
+            use_vertex_reranker=use_reranker,
+            vertex_reranker_model=reranker_model
+        )
+        
+        # Update progress: Start query variations
+        progress_indicator.update_step("query_variations", ProgressStatus.RUNNING)
+        await asyncio.sleep(0.1)  # Small delay for UI update
+        
+        # Update progress: HyDE generation
+        progress_indicator.update_step("query_variations", ProgressStatus.COMPLETED)
+        progress_indicator.update_step("hyde_generation", ProgressStatus.RUNNING)
+        await asyncio.sleep(0.1)
+        
+        # Update progress: Database search
+        progress_indicator.update_step("hyde_generation", ProgressStatus.COMPLETED)
+        progress_indicator.update_step("database_search", ProgressStatus.RUNNING)
+        await asyncio.sleep(0.1)
+        
+        # Update progress: Reranking
+        progress_indicator.update_step("database_search", ProgressStatus.COMPLETED)
+        if use_reranker:
+            progress_indicator.update_step("reranking", ProgressStatus.RUNNING)
+            await asyncio.sleep(0.1)
+            progress_indicator.update_step("reranking", ProgressStatus.COMPLETED)
+        else:
+            progress_indicator.update_step("reranking", ProgressStatus.COMPLETED, "⚡ Erweiterte Filterung verwendet")
+        
+        # Update progress: Response generation
+        progress_indicator.update_step("response_generation", ProgressStatus.RUNNING)
+        
+        # RAG Agent ausführen
+        response = await run_rag_agent_entrypoint(
+            question=question,
+            deps=deps,
+            llm_model="gemini-2.5-flash"
+        )
+        
+        # Complete response generation
+        progress_indicator.update_step("response_generation", ProgressStatus.COMPLETED)
+        
+        return response
+        
+    except Exception as e:
+        # Update progress with error
+        for step in progress_indicator.steps:
+            if step.status == ProgressStatus.RUNNING:
+                progress_indicator.update_step(step.name, ProgressStatus.ERROR, f"Fehler: {str(e)[:50]}...")
+                break
+        
+        return f"❌ Fehler bei der Antwortgenerierung: {str(e)}"
 
 def generate_rag_response(question: str, collection_name: str, chroma_client) -> str:
     """Generiere RAG-Antwort."""
