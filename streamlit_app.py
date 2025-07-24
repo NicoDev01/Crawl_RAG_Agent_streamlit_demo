@@ -254,23 +254,13 @@ def create_knowledge_base(crawler_client, chroma_client):
                     
                     if url_validation.is_valid:
                         if url_validation.warning_message:
-                            st.warning(f"{status_indicator} URL Status: Gültig mit Warnung")
+                            st.warning(f"{status_indicator} URL Status: Gültig mit Warnung - 👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
                         else:
-                            st.success(f"{status_indicator} URL Status: Gültig")
+                            st.success(f"{status_indicator} URL Status: Gültig - 👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
                         
-                        # Intelligente Typ-Erkennung
+                        # Intelligente Typ-Erkennung (nur für interne Logik)
                         detected_method = detect_url_type(url)
                         st.session_state.detected_crawling_method = detected_method
-                        
-                        # Zeige erkannten Typ
-                        st.info(f"✨ {detected_method.icon} **{detected_method.description}**")
-                        
-                        # Zeige Grund für die Erkennung
-                        if "recommended_reason" in detected_method.settings:
-                            st.caption(f"💡 {detected_method.settings['recommended_reason']}")
-                        
-                        # Benutzerführung
-                        st.success("👇 Passe die Crawling-Einstellungen unten an und klicke dann auf 'Erstellen'")
                     else:
                         st.error(f"{status_indicator} URL Status: Ungültig")
                         st.session_state.detected_crawling_method = None
@@ -340,8 +330,7 @@ def create_knowledge_base(crawler_client, chroma_client):
                 st.warning("⚠️ Hohe Werte können zu langen Ladezeiten führen!")
                 
         else:
-            # Fallback wenn keine URL eingegeben
-            st.info("💡 Gib eine URL ein, um optimale Crawling-Einstellungen zu erhalten")
+            # Fallback wenn keine URL eingegeben - keine Hinweise mehr
             max_depth = 1  # Default auf 1
             max_pages = 1   # Default auf 1
         
