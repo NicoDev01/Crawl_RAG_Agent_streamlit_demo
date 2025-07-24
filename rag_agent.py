@@ -65,8 +65,18 @@ async def generate_with_gemini(prompt: str, system_prompt: str = "", project_id:
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY not configured")
         
-        # Create Gemini model
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+        # Create Gemini model with optimized generation config
+        generation_config = genai.types.GenerationConfig(
+            temperature=0.4,  # Etwas Kreativität für bessere Formulierungen
+            max_output_tokens=2048,
+            top_p=0.85,
+            top_k=40
+        )
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            generation_config=generation_config
+        )
         
         # Combine system prompt and user prompt
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
@@ -125,32 +135,34 @@ SYSTEM_PROMPT_TEMPLATE = (
     "## Kernanweisungen (Regeln):\n"
     "1.  **IMMER zuerst den `retrieve` Befehl nutzen:** Bevor du eine Frage beantwortest, die Informationen erfordert, MUSST du das `retrieve`-Tool verwenden, um den relevanten Kontext abzurufen. Antworte niemals aus dem Gedächtnis. Die einzige Ausnahme sind rein konversationelle Fragen (z.B. 'Hallo').\n"
     "2.  **100% kontextbasiert arbeiten:** Deine Antwort MUSS zu 100% auf den Informationen im `--- KONTEXT ---`-Block basieren. Füge keine Informationen hinzu, interpretiere nichts hinein und mache keine Annahmen.\n"
-    "3.  **Umgang mit fehlenden Informationen:** Wenn der Kontext die Antwort nicht enthält, MUSST du das klar sagen. Beispiel: 'Die bereitgestellten Dokumente enthalten keine Informationen zu diesem Thema.'\n"
-    "4.  **Sparsame Zitationen:** Verwende klickbare Links [(1)](URL) nur EINMAL pro Person/Thema, nicht nach jedem Satz. Platziere sie strategisch nach Namen oder wichtigen Fakten. Verwende die URLs aus dem URL_MAPPING.\n"
-    "5.  **Quellen formatieren:** Am Ende MUSST du unter '**Quellen:**' (mit Zeilenumbruch) jede Quelle in einer SEPARATEN Zeile auflisten:\n"
-    "**Quellen:**\n"
-    "(1): https://example.com\n"
-    "(2): https://example.com\n"
-    "NIEMALS alle Quellen in einer Zeile!\n\n"
+    "3.  **Intelligente Auswahl:** Du erhältst viele Kontext-Teile zur Auswahl. Wähle die relevantesten aus und kombiniere sie zu einer umfassenden Antwort. Du musst NICHT alle Chunks verwenden - fokussiere auf die wichtigsten für die Frage.\n"
+    "4.  **Umgang mit fehlenden Informationen:** Wenn der Kontext die Antwort nicht enthält, MUSST du das klar sagen. Beispiel: 'Die bereitgestellten Dokumente enthalten keine Informationen zu diesem Thema.'\n\n"
+    
+    "## Antwort-Stil und Formatierung:\n"
+    "- **Redundanz vermeiden:** Keine Quellen-Platzhalter wie '(1)' oder wiederholte Phrasen ('laut Quelle...') im Fließtext. Nutze nur am Ende Kurz-Zitationen mit hochgestellten Zahlen¹.\n"
+    "- **Strukturierung:** Nutze prägnante Überschriften. Fasse jeden Aspekt in 1-2 Sätzen zusammen, dann optional ein kurzer Zusatz-Fakt.\n"
+    "- **Schreibstil:** Formuliere neutral-sachlich, aber leserfreundlich. Vermeide staccato-artige Stichpunkte, wenn ein zusammenhängender Absatz möglich ist.\n"
+    "- **Fazit-Regel:** Schließe mit einem knappen Satz, warum das Wissen praktisch nützt oder welche Fehlvorstellung es korrigiert.\n\n"
     
     "## Dein Arbeitsprozess:\n"
     "1.  Analysiere die Nutzerfrage.\n"
     "2.  Rufe mit dem `retrieve`-Tool den Kontext ab.\n"
-    "3.  Formuliere eine Antwort *ausschließlich* basierend auf dem `--- KONTEXT ---`. Verwende für jeden Fakt nur EINE Quellenangabe (die erste relevante).\n"
-    "4.  Füge am Ende unter '**Quellen:**\\n' nur die tatsächlich verwendeten Quellen als vollständige URLs auf.\n\n"
+    "3.  **Kontext-Analyse:** Durchsuche alle bereitgestellten Kontext-Teile und identifiziere die relevantesten Informationen.\n"
+    "4.  **Intelligente Synthese:** Kombiniere die besten Informationen aus verschiedenen Quellen zu einer umfassenden Antwort.\n"
+    "5.  Verwende hochgestellte Zahlen¹ ² ³ für Quellenverweise im Text (sparsam).\n"
+    "6.  Füge am Ende unter '**Quellen:**' nur die tatsächlich verwendeten Quellen auf.\n\n"
     
     "## Beispiel für korrekte Formatierung:\n"
-    "**Person Name** [(1)](https://example.com/person):\n"
-    "- **Position:** Anwendungsentwickler\n"
-    "- **Aufgaben:** Webentwicklung, PHP, JavaScript\n"
-    "- **Besonderheiten:** Lieblings-Emoji 😎, typischer Satz: 'Muss ja...'\n"
-    "- **Kontakt:** email@company.com, +49 123 456789\n\n"
+    "### Hauptthema\n"
+    "Die wichtigste Information wird hier in 1-2 zusammenhängenden Sätzen erklärt¹. Ein zusätzlicher Fakt kann die Erklärung vertiefen.\n\n"
+    "### Weitere Aspekte\n"
+    "Ergänzende Informationen werden ebenfalls in fließendem Text dargestellt². Stichpunkte nur wenn wirklich nötig:\n"
+    "- Punkt A\n"
+    "- Punkt B\n\n"
+    "**Praktischer Nutzen:** Dieses Wissen hilft dabei, [konkrete Anwendung] zu verstehen.\n\n"
     "**Quellen:**\n"
-    "(1): https://example.com/person\n\n"
-    
-    "## KRITISCH WICHTIG für Quellenangaben:\n"
-    "- Verwende jede URL nur EINMAL, auch wenn sie in mehreren Dokumenten vorkommt\n"
-    "- NIEMALS alle Quellen in einer Zeile schreiben!\n"
+    "¹ https://example.com/quelle1\n"
+    "² https://example.com/quelle2\n\n"
     
     "--- KONTEXT ---\n"
     "{context}\n"
@@ -172,11 +184,17 @@ agent = Agent(
 
 
 def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
-    """Formats the retrieved documents into a single context string with deduplicated numbered references."""
+    """Formats the retrieved documents into a single context string with deduplicated numbered references using superscript numbers."""
     if len(docs_texts) != len(metadatas):
         raise ValueError("docs_texts and metadatas must have the same length")
     
-    # Create a mapping of unique URLs to reference numbers and store URLs for inline links
+    # Mapping für hochgestellte Zahlen
+    superscript_map = {
+        1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', 10: '¹⁰',
+        11: '¹¹', 12: '¹²', 13: '¹³', 14: '¹⁴', 15: '¹⁵', 16: '¹⁶', 17: '¹⁷', 18: '¹⁸', 19: '¹⁹', 20: '²⁰'
+    }
+    
+    # Create a mapping of unique URLs to reference numbers
     url_to_ref_num = {}
     unique_sources = []
     context_parts = []
@@ -188,12 +206,14 @@ def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
         if source_url not in url_to_ref_num:
             ref_num = len(url_to_ref_num) + 1
             url_to_ref_num[source_url] = ref_num
-            unique_sources.append(f"({ref_num}): {source_url}")
+            superscript = superscript_map.get(ref_num, f"^{ref_num}")
+            unique_sources.append(f"{superscript} {source_url}")
         else:
             ref_num = url_to_ref_num[source_url]
         
-        # Add numbered reference to the document text
-        context_parts.append(f"[Quelle {ref_num}] {doc_text}")
+        # Add numbered reference to the document text with superscript
+        superscript = superscript_map.get(ref_num, f"^{ref_num}")
+        context_parts.append(f"[Quelle {superscript}] {doc_text}")
     
     if not context_parts:
         return "No relevant context found."
@@ -202,10 +222,13 @@ def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
     context_text = "\n\n---\n\n".join(context_parts)
     references_text = "\n".join(unique_sources)
     
-    # Also provide URL mapping for inline citations
-    url_mapping_text = "\n".join([f"QUELLE_{ref_num}_URL: {url}" for url, ref_num in url_to_ref_num.items()])
+    # Provide URL mapping for the LLM to use in responses
+    url_mapping_instructions = "ANWEISUNG FÜR ZITATIONEN: Verwende diese hochgestellten Zahlen sparsam im Text:\n"
+    for url, ref_num in url_to_ref_num.items():
+        superscript = superscript_map.get(ref_num, f"^{ref_num}")
+        url_mapping_instructions += f"{superscript} = {url}\n"
     
-    return f"{context_text}\n\n--- QUELLENVERZEICHNIS ---\n{references_text}\n\n--- URL_MAPPING ---\n{url_mapping_text}"
+    return f"{context_text}\n\n--- QUELLENVERZEICHNIS ---\n{references_text}\n\n--- ZITATIONS-MAPPING ---\n{url_mapping_instructions}"
 
 def format_structured_answer(structured_answer: StructuredRagAnswer) -> str:
     """Format a structured answer into a readable text format."""
@@ -390,11 +413,56 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         final_docs = [item['document'] for item in reranked_results]
         final_metadatas = [item['metadata'] for item in reranked_results]
     else:
-        print("WARNUNG: Vertex AI Re-ranker nicht konfiguriert. Überspringe Re-Ranking.")
-        # Fallback: Use the top N results from the initial search
-        top_n_initial = initial_docs_with_meta[:n_results]
-        final_docs = [item['document'] for item in top_n_initial]
-        final_metadatas = [item['metadata'] for item in top_n_initial]
+        print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
+        # Erweiterte Fallback-Filterung mit mehreren Kriterien
+        filtered_docs = []
+        query_words = set(search_query.lower().split())
+        
+        # Entferne Stoppwörter für bessere Relevanz
+        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
+        query_words = query_words - stop_words
+        
+        for doc_meta in initial_docs_with_meta:
+            doc_text = doc_meta['document'].lower()
+            doc_words = set(doc_text.split()) - stop_words
+            
+            # Mehrere Relevanz-Kriterien
+            word_overlap = len(query_words.intersection(doc_words))
+            
+            # Bonus für exakte Phrasen-Matches
+            phrase_bonus = 0
+            for word in query_words:
+                if word in doc_text:
+                    phrase_bonus += 2  # Höherer Bonus für exakte Matches
+            
+            # Bonus für wichtige Keywords (falls in der Frage)
+            keyword_bonus = 0
+            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
+            for word in important_words:
+                if word in doc_text and any(w in search_query.lower() for w in [word, 'definiert', 'definition']):
+                    keyword_bonus += 3
+            
+            # Bonus für Dokumentlänge (mehr Inhalt = potentiell mehr Info)
+            length_bonus = min(len(doc_text) / 1000, 1.5)  # Max 1.5 Punkte für Länge
+            
+            # Malus für sehr kurze Dokumente (oft wenig informativ)
+            length_penalty = -2 if len(doc_text) < 100 else 0
+            
+            # Gesamtscore
+            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
+            
+            if total_score > 0:  # Nur Docs mit positivem Score
+                filtered_docs.append((doc_meta, total_score))
+        
+        # Sortiere nach Score und nimm die besten n_results + 3 (etwas mehr als angefragt)
+        filtered_docs.sort(key=lambda x: x[1], reverse=True)
+        top_filtered = filtered_docs[:min(n_results + 3, len(filtered_docs))]
+        
+        final_docs = [item[0]['document'] for item in top_filtered]
+        final_metadatas = [item[0]['metadata'] for item in top_filtered]
+        
+        print(f"---> Enhanced filtering: {len(final_docs)} most relevant chunks")
+        print(f"---> Top 3 scores: {[f'{item[1]:.1f}' for item in top_filtered[:3]]}")
 
     print("--- Context Provided to LLM ---")
     return _format_context_parts(final_docs, final_metadatas)
@@ -458,7 +526,7 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
         print(f"Error generating hypothetical answer: {e}. Falling back to original query.")
 
     # --- Initial Retrieval Step --- 
-    initial_n_results = 50  # Erhöhe die Anzahl der initialen Kandidaten
+    initial_n_results = 50  # Mehr Kandidaten für bessere Abdeckung
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
     # Intelligente Embedding-Auswahl basierend auf Collection-Typ
@@ -554,11 +622,56 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
         final_docs = [item['document'] for item in reranked_results]
         final_metadatas = [item['metadata'] for item in reranked_results]
     else:
-        print("WARNUNG: Vertex AI Re-ranker nicht konfiguriert. Überspringe Re-Ranking.")
-        # Fallback: Use the top N results from the initial search
-        top_n_initial = initial_docs_with_meta[:10]
-        final_docs = [item['document'] for item in top_n_initial]
-        final_metadatas = [item['metadata'] for item in top_n_initial]
+        print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
+        # Erweiterte Fallback-Filterung mit mehreren Kriterien
+        filtered_docs = []
+        query_words = set(question.lower().split())
+        
+        # Entferne Stoppwörter für bessere Relevanz
+        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
+        query_words = query_words - stop_words
+        
+        for doc_meta in initial_docs_with_meta:
+            doc_text = doc_meta['document'].lower()
+            doc_words = set(doc_text.split()) - stop_words
+            
+            # Mehrere Relevanz-Kriterien
+            word_overlap = len(query_words.intersection(doc_words))
+            
+            # Bonus für exakte Phrasen-Matches
+            phrase_bonus = 0
+            for word in query_words:
+                if word in doc_text:
+                    phrase_bonus += 2  # Höherer Bonus für exakte Matches
+            
+            # Bonus für wichtige Keywords (falls in der Frage)
+            keyword_bonus = 0
+            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
+            for word in important_words:
+                if word in doc_text and any(w in question.lower() for w in [word, 'definiert', 'definition']):
+                    keyword_bonus += 3
+            
+            # Bonus für Dokumentlänge (mehr Inhalt = potentiell mehr Info)
+            length_bonus = min(len(doc_text) / 1000, 1.5)  # Max 1.5 Punkte für Länge
+            
+            # Malus für sehr kurze Dokumente (oft wenig informativ)
+            length_penalty = -2 if len(doc_text) < 100 else 0
+            
+            # Gesamtscore
+            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
+            
+            if total_score > 0:  # Nur Docs mit positivem Score
+                filtered_docs.append((doc_meta, total_score))
+        
+        # Sortiere nach Score und nimm die besten 15 (mehr Kontext für bessere Antworten)
+        filtered_docs.sort(key=lambda x: x[1], reverse=True)
+        top_filtered = filtered_docs[:15]
+        
+        final_docs = [item[0]['document'] for item in top_filtered]
+        final_metadatas = [item[0]['metadata'] for item in top_filtered]
+        
+        print(f"---> Enhanced filtering: {len(final_docs)} most relevant chunks")
+        print(f"---> Top 3 scores: {[f'{item[1]:.1f}' for item in top_filtered[:3]]}")
 
     print("--- Context Provided to Gemini ---")
     return _format_context_parts(final_docs, final_metadatas)

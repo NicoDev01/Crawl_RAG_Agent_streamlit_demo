@@ -858,14 +858,68 @@ def generate_rag_response(question: str, collection_name: str, chroma_client) ->
         # Import des RAG Agents
         from rag_agent import run_rag_agent_entrypoint, RAGDeps
         
-        # Setup
-        vertex_project_id = st.secrets.get("GOOGLE_CLOUD_PROJECT")
-        vertex_location = st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        # Setup - Vertex AI Konfiguration
+        # Lade .env Datei explizit für lokale Entwicklung
+        import dotenv
+        dotenv.load_dotenv()
+        
+        # Versuche zuerst Streamlit Secrets, dann .env, dann Fallback
+        vertex_project_id = (
+            st.secrets.get("GOOGLE_CLOUD_PROJECT") or 
+            os.getenv("GOOGLE_CLOUD_PROJECT") or 
+            "vertexai-408416"
+        )
+        vertex_location = (
+            st.secrets.get("GOOGLE_CLOUD_LOCATION") or 
+            os.getenv("GOOGLE_CLOUD_LOCATION") or 
+            "us-central1"
+        )
         
         # Gemini API Key setzen
-        gemini_key = st.secrets.get("GEMINI_API_KEY")
+        gemini_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         if gemini_key:
             os.environ["GEMINI_API_KEY"] = gemini_key
+        
+        # Google Cloud Credentials für lokale Entwicklung
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            # Suche nach der JSON-Datei im aktuellen Verzeichnis
+            json_files = [f for f in os.listdir('.') if f.startswith('vertexai-') and f.endswith('.json')]
+            if json_files:
+                credentials_path = json_files[0]
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+                print(f"INFO: Google Cloud Credentials gesetzt: {credentials_path}")
+            else:
+                print("WARNING: Keine Google Cloud Credentials JSON-Datei gefunden")
+        
+        # Reranker konfigurieren - Alternative Konfigurationen testen
+        reranker_model = None
+        if vertex_project_id:
+            # Verschiedene mögliche Ranking Config Pfade
+            possible_configs = [
+                f"projects/{vertex_project_id}/locations/global/rankingConfigs/default_ranking_config",
+                f"projects/{vertex_project_id}/locations/us-central1/rankingConfigs/default_ranking_config",
+                f"projects/{vertex_project_id}/locations/global/rankingConfigs/default",
+            ]
+            reranker_model = possible_configs[0]  # Verwende den ersten als Standard
+        
+        # Debug Info für Reranker-Status
+        print(f"DEBUG: vertex_project_id = {vertex_project_id}")
+        print(f"DEBUG: vertex_location = {vertex_location}")
+        print(f"DEBUG: use_vertex_reranker = {bool(vertex_project_id)}")
+        print(f"DEBUG: reranker_model = {reranker_model}")
+        
+        # Reranker-Status bestimmen - IAM-Berechtigung jetzt verfügbar
+        use_vertex_reranker_env = os.getenv("USE_VERTEX_RERANKER", "false").lower() == "true"
+        use_reranker = bool(vertex_project_id) and use_vertex_reranker_env  # Wieder aktiviert
+        
+        if vertex_project_id:
+            print(f"INFO: Vertex AI Project gefunden: {vertex_project_id}")
+            if use_vertex_reranker_env:
+                print("INFO: Vertex AI Reranker aktiviert")
+            else:
+                print("INFO: Vertex AI Reranker deaktiviert (USE_VERTEX_RERANKER=false)")
+        else:
+            print("WARNING: Keine Vertex AI Project ID gefunden, verwende erweiterte Fallback-Filterung")
         
         deps = RAGDeps(
             chroma_client=chroma_client,
@@ -874,8 +928,8 @@ def generate_rag_response(question: str, collection_name: str, chroma_client) ->
             embedding_provider="vertex_ai",
             vertex_project_id=vertex_project_id,
             vertex_location=vertex_location,
-            use_vertex_reranker=False,
-            vertex_reranker_model=None
+            use_vertex_reranker=use_reranker,  # Aktiviere basierend auf .env und Project ID
+            vertex_reranker_model=reranker_model
         )
         
         # RAG Agent ausführen
