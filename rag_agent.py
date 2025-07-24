@@ -3,8 +3,10 @@
 import os
 import sys
 import argparse
+import hashlib
+import time
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Any
 from pydantic import BaseModel, Field
 
 # Define structured output model for RAG responses
@@ -58,6 +60,170 @@ if gemini_api_key:
 else:
     print("Warning: GEMINI_API_KEY not found. Gemini will not be available.")
 
+
+# ===== OPTIMIZATION: LLM Response Cache =====
+class LLMResponseCache:
+    """Intelligent cache for LLM responses based on question and context content."""
+    
+    def __init__(self, ttl_hours: int = 24, max_size: int = 500):
+        self.cache = {}  # content_hash -> (response, timestamp, access_count)
+        self.ttl = ttl_hours * 3600  # Convert to seconds
+        self.max_size = max_size
+        self.hit_count = 0
+        self.miss_count = 0
+    
+    def _normalize_context(self, context: str) -> str:
+        """Normalize context by removing URLs and timestamps, keeping content."""
+        import re
+        # Remove URLs but keep the content structure
+        normalized = re.sub(r'https?://[^\s]+', '', context)
+        # Remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized
+    
+    def _get_cache_key(self, question: str, context: str) -> str:
+        """Generate cache key from question and normalized context."""
+        normalized_context = self._normalize_context(context)
+        content = f"{question.lower().strip()}|{normalized_context}"
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+    
+    def _cleanup_expired(self):
+        """Remove expired entries from cache."""
+        current_time = time.time()
+        expired_keys = [
+            key for key, (_, timestamp, _) in self.cache.items()
+            if current_time - timestamp > self.ttl
+        ]
+        for key in expired_keys:
+            del self.cache[key]
+    
+    def _evict_lru(self):
+        """Evict least recently used entries if cache is full."""
+        if len(self.cache) >= self.max_size:
+            # Sort by access count (LRU approximation)
+            sorted_items = sorted(
+                self.cache.items(),
+                key=lambda x: (x[1][2], x[1][1])  # Sort by access_count, then timestamp
+            )
+            # Remove oldest 20% of entries
+            remove_count = max(1, len(sorted_items) // 5)
+            for key, _ in sorted_items[:remove_count]:
+                del self.cache[key]
+    
+    def get(self, question: str, context: str) -> Optional[str]:
+        """Get cached response if available and not expired."""
+        self._cleanup_expired()
+        
+        cache_key = self._get_cache_key(question, context)
+        
+        if cache_key in self.cache:
+            response, timestamp, access_count = self.cache[cache_key]
+            # Update access count for LRU
+            self.cache[cache_key] = (response, timestamp, access_count + 1)
+            self.hit_count += 1
+            print(f"🎯 Cache HIT for question: {question[:50]}...")
+            return response
+        
+        self.miss_count += 1
+        return None
+    
+    def store(self, question: str, context: str, response: str):
+        """Store response in cache."""
+        self._cleanup_expired()
+        self._evict_lru()
+        
+        cache_key = self._get_cache_key(question, context)
+        current_time = time.time()
+        
+        self.cache[cache_key] = (response, current_time, 1)
+        print(f"💾 Cached response for: {question[:50]}...")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        total_requests = self.hit_count + self.miss_count
+        hit_rate = (self.hit_count / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            "cache_size": len(self.cache),
+            "hit_count": self.hit_count,
+            "miss_count": self.miss_count,
+            "hit_rate_percent": round(hit_rate, 1),
+            "max_size": self.max_size
+        }
+
+
+# ===== OPTIMIZATION: Query Embedding Cache =====
+class QueryEmbeddingCache:
+    """Cache for query embeddings to avoid redundant API calls."""
+    
+    def __init__(self, max_size: int = 1000):
+        self.cache = {}  # query_hash -> (embedding, timestamp, access_count)
+        self.max_size = max_size
+        self.hit_count = 0
+        self.miss_count = 0
+    
+    def _get_query_hash(self, query: str) -> str:
+        """Generate hash for query."""
+        normalized_query = query.lower().strip()
+        return hashlib.md5(normalized_query.encode('utf-8')).hexdigest()
+    
+    def _evict_lru(self):
+        """Evict least recently used entries if cache is full."""
+        if len(self.cache) >= self.max_size:
+            # Sort by access count (LRU approximation)
+            sorted_items = sorted(
+                self.cache.items(),
+                key=lambda x: (x[1][2], x[1][1])  # Sort by access_count, then timestamp
+            )
+            # Remove oldest 20% of entries
+            remove_count = max(1, len(sorted_items) // 5)
+            for key, _ in sorted_items[:remove_count]:
+                del self.cache[key]
+    
+    def get(self, query: str) -> Optional[List[float]]:
+        """Get cached embedding if available."""
+        query_hash = self._get_query_hash(query)
+        
+        if query_hash in self.cache:
+            embedding, timestamp, access_count = self.cache[query_hash]
+            # Update access count for LRU
+            self.cache[query_hash] = (embedding, timestamp, access_count + 1)
+            self.hit_count += 1
+            print(f"🎯 Embedding cache HIT for: {query[:30]}...")
+            return embedding
+        
+        self.miss_count += 1
+        return None
+    
+    def store(self, query: str, embedding: List[float]):
+        """Store embedding in cache."""
+        self._evict_lru()
+        
+        query_hash = self._get_query_hash(query)
+        current_time = time.time()
+        
+        self.cache[query_hash] = (embedding, current_time, 1)
+        print(f"💾 Cached embedding for: {query[:30]}...")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        total_requests = self.hit_count + self.miss_count
+        hit_rate = (self.hit_count / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            "cache_size": len(self.cache),
+            "hit_count": self.hit_count,
+            "miss_count": self.miss_count,
+            "hit_rate_percent": round(hit_rate, 1),
+            "max_size": self.max_size
+        }
+
+
+# Initialize global cache instances
+llm_cache = LLMResponseCache(ttl_hours=1, max_size=500)
+embedding_cache = QueryEmbeddingCache(max_size=1000)
+
+
 async def generate_with_gemini(prompt: str, system_prompt: str = "", project_id: str = None, location: str = "us-central1") -> str:
     """Generate text using Gemini 2.5 Flash with fallback to OpenAI."""
     try:
@@ -65,7 +231,7 @@ async def generate_with_gemini(prompt: str, system_prompt: str = "", project_id:
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY not configured")
         
-        # Create Gemini model with optimized generation config
+        # Create Gemini model with optimized generation config for consistency
         generation_config = genai.types.GenerationConfig(
             temperature=0.4,  # Etwas Kreativität für bessere Formulierungen
             max_output_tokens=2048,
@@ -166,9 +332,10 @@ SYSTEM_PROMPT_TEMPLATE = (
     "4.  **Umgang mit fehlenden Informationen:** Wenn der Kontext die Antwort nicht enthält, MUSST du das klar sagen. Beispiel: 'Die bereitgestellten Dokumente enthalten keine Informationen zu diesem Thema.'\n\n"
     
     "## Antwort-Stil und Formatierung:\n"
-    "- **Klickbare Quellenverweise:** Verwende hochgestellte Zahlen als KLICKBARE LINKS im Format [¹](URL), [²](URL) etc. im Fließtext, damit Nutzer direkt zur Quelle springen können.\n"
+    "- **Klickbare Quellenverweise:** Verwende IMMER hochgestellte Zahlen als KLICKBARE LINKS im Format [¹](URL), [²](URL) etc. im Fließtext. NIEMALS nur hochgestellte Zahlen ohne Links verwenden.\n"
     "- **Strukturierung:** Nutze prägnante Überschriften. Fasse jeden Aspekt in 1-2 Sätzen zusammen, dann optional ein kurzer Zusatz-Fakt.\n"
     "- **Schreibstil:** Formuliere neutral-sachlich, aber leserfreundlich. Vermeide staccato-artige Stichpunkte, wenn ein zusammenhängender Absatz möglich ist.\n"
+    "- **Konsistenz:** Halte die gleiche Detailtiefe und Formatierung wie in der ersten Antwort bei. Jede Antwort soll vollständig und umfassend sein.\n"
     "- **Fazit-Regel:** Schließe mit einem knappen Satz, warum das Wissen praktisch nützt oder welche Fehlvorstellung es korrigiert.\n\n"
     
     "## Dein Arbeitsprozess:\n"
@@ -203,6 +370,71 @@ agent = Agent(
     model="gpt-4.1-mini",
     llm=aclient
 )
+
+
+def _unified_relevance_filter(docs_with_meta: list[dict], question: str, max_results: int = 15) -> tuple[list[str], list[dict]]:
+    """Unified relevance filtering for both retrieval paths."""
+    query_words = set(question.lower().split())
+    
+    # Entferne Stoppwörter für bessere Relevanz
+    stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
+    query_words = query_words - stop_words
+    
+    filtered_docs = []
+    
+    for doc_meta in docs_with_meta:
+        doc_text = doc_meta['document'].lower()
+        doc_words = set(doc_text.split()) - stop_words
+        
+        # 1. Word overlap ratio (most important)
+        word_overlap = len(query_words.intersection(doc_words))
+        word_overlap_ratio = word_overlap / max(len(query_words), 1)
+        
+        # 2. Exact phrase matching (weighted by word length)
+        phrase_bonus = 0
+        for word in query_words:
+            if word in doc_text:
+                word_weight = max(1, len(word) / 3)  # Longer words get higher bonus
+                phrase_bonus += word_weight
+        
+        # 3. Question type bonus (generic)
+        keyword_bonus = 0
+        question_indicators = {'definition', 'was ist', 'bedeutung', 'erklärung', 'beschreibung'}
+        if any(indicator in question.lower() for indicator in question_indicators):
+            definition_words = {'definition', 'bedeutet', 'bezeichnet', 'versteht man', 'ist ein', 'sind'}
+            for word in definition_words:
+                if word in doc_text:
+                    keyword_bonus += 2
+        
+        # 4. Document quality score
+        doc_length = len(doc_text)
+        if 200 <= doc_length <= 2000:  # Sweet spot
+            length_bonus = 1.5
+        elif doc_length < 50:  # Too short
+            length_bonus = -2
+        else:
+            length_bonus = min(doc_length / 1000, 1.5)  # Scale with length
+        
+        # 5. Calculate unified score
+        total_score = (
+            word_overlap_ratio * 20 +  # Primary weight
+            phrase_bonus * 5 +         # High bonus for exact matches
+            keyword_bonus * 3 +        # Moderate bonus for question type
+            length_bonus * 2           # Quality bonus
+        )
+        
+        # Only include docs with meaningful relevance
+        if total_score > 2.0:  # Higher threshold for better quality
+            filtered_docs.append((doc_meta, total_score))
+    
+    # Sort by score and take top results
+    filtered_docs.sort(key=lambda x: x[1], reverse=True)
+    top_filtered = filtered_docs[:max_results]
+    
+    final_docs = [item[0]['document'] for item in top_filtered]
+    final_metadatas = [item[0]['metadata'] for item in top_filtered]
+    
+    return final_docs, final_metadatas
 
 
 def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
@@ -257,7 +489,8 @@ def _format_context_parts(docs_texts: list[str], metadatas: list[dict]) -> str:
         superscript = superscript_map.get(ref_num, f"^{ref_num}")
         url_mapping_instructions += f"[{superscript}]({url}) für {url}\n"
     
-    url_mapping_instructions += "\nWICHTIG: Verwende im Fließtext das Format [¹](URL), [²](URL) etc. für klickbare Quellenverweise!"
+    url_mapping_instructions += "\nWICHTIG: Verwende im Fließtext IMMER das Format [{superscript}](URL) für klickbare Quellenverweise! NIEMALS nur hochgestellte Zahlen ohne Links verwenden.\n"
+    url_mapping_instructions += "KONSISTENZ: Halte die gleiche Detailtiefe und Formatierung wie in vorherigen Antworten bei. Jede Antwort soll vollständig und umfassend sein."
     
     return f"{context_text}\n\n--- QUELLENVERZEICHNIS ---\n{references_text}\n\n--- ZITATIONS-MAPPING ---\n{url_mapping_instructions}"
 
@@ -402,15 +635,24 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         else:
             # Collection verwendet wahrscheinlich Vertex AI Embeddings
             print("---> Using Vertex AI embeddings for query")
-            query_embedding_for_chroma = get_vertex_text_embedding(
-                text=hypothetical_answer,
-                model_name=context.deps.embedding_model_name,
-                task_type="RETRIEVAL_QUERY",
-                project_id=context.deps.vertex_project_id,
-                location=context.deps.vertex_location
-            )
+            
+            # Check embedding cache first
+            query_embedding_for_chroma = embedding_cache.get(hypothetical_answer)
+            
             if query_embedding_for_chroma is None:
-                return "Error generating query embedding with Vertex AI."
+                # Generate new embedding
+                query_embedding_for_chroma = get_vertex_text_embedding(
+                    text=hypothetical_answer,
+                    model_name=context.deps.embedding_model_name,
+                    task_type="RETRIEVAL_QUERY",
+                    project_id=context.deps.vertex_project_id,
+                    location=context.deps.vertex_location
+                )
+                if query_embedding_for_chroma is None:
+                    return "Error generating query embedding with Vertex AI."
+                
+                # Cache the embedding
+                embedding_cache.store(hypothetical_answer, query_embedding_for_chroma)
             
             results = collection.query(
                 query_embeddings=[query_embedding_for_chroma],
@@ -517,16 +759,25 @@ async def run_rag_agent_entrypoint(
             # Step 1: Get context using HyDE + retrieval
             context_result = await retrieve_context_for_gemini(question, deps)
             
-            # Step 2: Format the system prompt with context
+            # Step 2: Check LLM cache first
+            cached_response = llm_cache.get(question, context_result)
+            if cached_response:
+                return cached_response
+            
+            # Step 3: Format the system prompt with context
             system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context_result, question=question)
             
-            # Step 3: Generate normal response with Gemini (no JSON)
+            # Step 4: Generate normal response with Gemini (no JSON)
             response = await generate_with_gemini(
                 prompt=question,
                 system_prompt=system_prompt,
                 project_id=deps.vertex_project_id,
                 location=deps.vertex_location
             )
+            
+            # Step 5: Cache the response
+            llm_cache.store(question, context_result, response)
+            
             return response
         else:
             # Use the original Pydantic AI agent for non-Gemini models
@@ -536,29 +787,79 @@ async def run_rag_agent_entrypoint(
         logfire.exception("Agent execution failed", question=question, model=llm_model)
         raise RuntimeError(f"Agent execution failed: {e}") from e
 
+def analyze_question_complexity(question: str) -> str:
+    """Analyze question complexity for adaptive query expansion."""
+    word_count = len(question.split())
+    question_lower = question.lower()
+    
+    # Simple question indicators
+    simple_patterns = ['was ist', 'was bedeutet', 'wer ist', 'wo ist', 'wann ist']
+    definition_words = ['definition', 'bedeutung', 'erklärung']
+    
+    # Complex question indicators
+    complex_words = ['unterschied', 'vergleich', 'vs', 'versus', 'warum', 'wie funktioniert', 'welche arten']
+    has_multiple_concepts = len([w for w in question.split() if len(w) > 6]) > 2
+    has_comparison = any(word in question_lower for word in ['vs', 'versus', 'unterschied', 'vergleich'])
+    has_complex_words = any(word in question_lower for word in complex_words)
+    
+    # Classification logic
+    if word_count <= 4 and any(pattern in question_lower for pattern in simple_patterns):
+        return "simple"
+    elif any(word in question_lower for word in definition_words) and word_count <= 6:
+        return "simple"
+    elif has_comparison or has_multiple_concepts or has_complex_words or word_count > 10:
+        return "complex"
+    else:
+        return "moderate"
+
+
 async def generate_query_variations(question: str, deps: RAGDeps) -> List[str]:
-    """Generate multiple query variations for better retrieval coverage."""
+    """Generate adaptive query variations based on question complexity."""
     variations = [question]  # Original query
     
-    # Generate semantic variations
-    variation_prompt = f"""Generate 3 different ways to ask the same question for better search results. 
-    Make them semantically different but asking for the same information.
+    # Analyze question complexity
+    complexity = analyze_question_complexity(question)
+    print(f"🧠 Question complexity: {complexity}")
     
-    Original question: {question}
-    
-    Return only the 3 variations, one per line, without numbering or explanation."""
+    # Adaptive variation generation
+    if complexity == "simple":
+        # Simple questions: Only 1 variation to avoid semantic drift
+        variation_prompt = f"""Generate 1 alternative way to ask this simple question. Keep it focused and direct, don't expand the scope.
+        
+        Original question: {question}
+        
+        Return only the 1 variation without numbering or explanation."""
+        max_variations = 1
+    elif complexity == "moderate":
+        # Moderate questions: 2 variations
+        variation_prompt = f"""Generate 2 different ways to ask the same question for better search results. 
+        Make them semantically different but asking for the same core information.
+        
+        Original question: {question}
+        
+        Return only the 2 variations, one per line, without numbering or explanation."""
+        max_variations = 2
+    else:  # complex
+        # Complex questions: 3 variations for better coverage
+        variation_prompt = f"""Generate 3 different ways to ask this complex question for comprehensive search results. 
+        Make them semantically different but asking for the same detailed information.
+        
+        Original question: {question}
+        
+        Return only the 3 variations, one per line, without numbering or explanation."""
+        max_variations = 3
     
     try:
         variations_text = await generate_with_gemini(
             prompt=variation_prompt,
-            system_prompt="You generate query variations for better search coverage. Create semantically different but equivalent questions.",
+            system_prompt="You generate query variations for better search coverage. Create semantically different but equivalent questions. Keep variations focused and avoid expanding the scope.",
             project_id=deps.vertex_project_id,
             location=deps.vertex_location
         )
         
         # Parse variations
         new_variations = [v.strip() for v in variations_text.split('\n') if v.strip()]
-        variations.extend(new_variations[:3])  # Max 3 additional variations
+        variations.extend(new_variations[:max_variations])
         
     except Exception as e:
         print(f"Error generating query variations: {e}. Using original query only.")
@@ -580,12 +881,21 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
     
     async def process_single_query(query: str) -> Tuple[str, str]:
         """Process a single query with HyDE."""
-        hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Focus on providing factual information that would typically be found in documentation, articles, or informational content. Question: {query}"
+        # Für sehr einfache Fragen, direktere HyDE-Prompts verwenden
+        if len(query.split()) <= 3 and any(word in query.lower() for word in ['was ist', 'was bedeutet', 'definition']):
+            hyde_prompt = f"""Generate a concise, direct definition or explanation that answers this simple question. 
+            Focus on the core meaning and avoid expanding into unrelated topics.
+            
+            Question: {query}
+            
+            Provide a focused, dictionary-style answer that directly addresses what is being asked."""
+        else:
+            hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Focus on providing factual information that would typically be found in documentation, articles, or informational content. Question: {query}"
         
         try:
             hypothetical_answer = await generate_with_gemini(
                 prompt=hyde_prompt,
-                system_prompt="You generate hypothetical answers for RAG retrieval. Create realistic content that could be found in documentation, articles, or informational websites. Be factual and relevant to the specific question asked.",
+                system_prompt="You generate hypothetical answers for RAG retrieval. Create realistic content that could be found in documentation, articles, or informational websites. Be factual and relevant to the specific question asked. For simple definition questions, keep answers focused and avoid expanding scope.",
                 project_id=deps.vertex_project_id,
                 location=deps.vertex_location
             )
@@ -603,8 +913,52 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
     # --- Parallel Retrieval for all HyDE answers ---
     print("🔍 Searching database with all variations...")
     
-    async def search_single_hyde(hyde_answer: str) -> List[Dict]:
-        """Search ChromaDB with a single HyDE answer."""
+    # --- Batch Embedding Processing ---
+    async def batch_generate_embeddings(hyde_answers: List[str]) -> Dict[str, List[float]]:
+        """Generate embeddings for multiple HyDE answers in parallel with caching."""
+        print(f"⚡ Batch processing {len(hyde_answers)} embeddings...")
+        
+        # Check cache for existing embeddings
+        cached_embeddings = {}
+        uncached_answers = []
+        
+        for answer in hyde_answers:
+            cached_embedding = embedding_cache.get(answer)
+            if cached_embedding is not None:
+                cached_embeddings[answer] = cached_embedding
+            else:
+                uncached_answers.append(answer)
+        
+        print(f"---> Cache hits: {len(cached_embeddings)}, Cache misses: {len(uncached_answers)}")
+        
+        # Generate embeddings for uncached answers in parallel
+        async def generate_single_embedding(text: str) -> Tuple[str, List[float] | None]:
+            embedding = get_vertex_text_embedding(
+                text=text,
+                model_name=deps.embedding_model_name,
+                task_type="RETRIEVAL_QUERY",
+                project_id=deps.vertex_project_id,
+                location=deps.vertex_location
+            )
+            return text, embedding
+        
+        # Process uncached embeddings in parallel
+        if uncached_answers:
+            embedding_results = await asyncio.gather(*[
+                generate_single_embedding(answer) for answer in uncached_answers
+            ], return_exceptions=True)
+            
+            # Store new embeddings in cache
+            for result in embedding_results:
+                if isinstance(result, tuple) and result[1] is not None:
+                    text, embedding = result
+                    cached_embeddings[text] = embedding
+                    embedding_cache.store(text, embedding)
+        
+        return cached_embeddings
+    
+    async def search_single_hyde(hyde_answer: str, embedding_dict: Dict[str, List[float]]) -> List[Dict]:
+        """Search ChromaDB with a single HyDE answer using pre-computed embeddings."""
         try:
             collection = get_or_create_collection(
                 client=deps.chroma_client,
@@ -622,19 +976,15 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
             
             # Query based on embedding type
             if collection_embedding_dim == 384:
+                # Use text-based query for sentence-transformers
                 results = collection.query(
                     query_texts=[hyde_answer],
                     n_results=20,  # Weniger pro Query, da wir mehrere haben
                     include=['metadatas', 'documents']
                 )
             else:
-                query_embedding = get_vertex_text_embedding(
-                    text=hyde_answer,
-                    model_name=deps.embedding_model_name,
-                    task_type="RETRIEVAL_QUERY",
-                    project_id=deps.vertex_project_id,
-                    location=deps.vertex_location
-                )
+                # Use pre-computed Vertex AI embedding
+                query_embedding = embedding_dict.get(hyde_answer)
                 if query_embedding is None:
                     return []
                 
@@ -658,9 +1008,13 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
             print(f"Error in search_single_hyde: {e}")
             return []
     
-    # Execute all searches in parallel
+    # Generate embeddings in batch for all HyDE answers
+    hyde_answers = [hyde_answer for _, hyde_answer in query_hyde_pairs]
+    embedding_dict = await batch_generate_embeddings(hyde_answers)
+    
+    # Execute all searches in parallel with pre-computed embeddings
     all_search_results = await asyncio.gather(*[
-        search_single_hyde(hyde_answer) 
+        search_single_hyde(hyde_answer, embedding_dict) 
         for _, hyde_answer in query_hyde_pairs
     ])
     
@@ -696,44 +1050,57 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
         final_metadatas = [item['metadata'] for item in reranked_results]
     else:
         print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
-        # Enhanced fallback filtering
+        # Enhanced fallback filtering with better semantic matching
         filtered_docs = []
         query_words = set(question.lower().split())
         
         # Remove stop words
-        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
+        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum', 'ein', 'eine', 'einen'}
         query_words = query_words - stop_words
         
         for doc_meta in combined_docs:
             doc_text = doc_meta['document'].lower()
             doc_words = set(doc_text.split()) - stop_words
             
-            # Multiple relevance criteria
+            # 1. Base word overlap score (most important)
             word_overlap = len(query_words.intersection(doc_words))
+            if len(query_words) > 0:
+                word_overlap_ratio = word_overlap / len(query_words)
+            else:
+                word_overlap_ratio = 0
             
-            # Bonus for exact phrase matches
-            phrase_bonus = 0
+            # 2. Exact phrase matching in document
+            phrase_score = 0
             for word in query_words:
                 if word in doc_text:
-                    phrase_bonus += 2
+                    phrase_score += 1
             
-            # Bonus for important keywords
-            keyword_bonus = 0
-            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
-            for word in important_words:
-                if word in doc_text and any(w in question.lower() for w in [word, 'definiert', 'definition']):
-                    keyword_bonus += 3
+            # 3. Question type bonus (generic approach)
+            question_type_bonus = 0
+            if any(q_word in question.lower() for q_word in ['was ist', 'was bedeutet', 'definition', 'erkläre']):
+                # Definition questions: look for explanatory language
+                if any(def_word in doc_text for def_word in ['ist', 'bedeutet', 'bezeichnet', 'definition', 'erklärung']):
+                    question_type_bonus += 2
             
-            # Length bonus
-            length_bonus = min(len(doc_text) / 1000, 1.5)
+            # 4. Document quality indicators
+            quality_score = 0
+            # Prefer documents with reasonable length (not too short, not too long)
+            doc_length = len(doc_text)
+            if 200 <= doc_length <= 2000:  # Sweet spot for informative chunks
+                quality_score += 1
+            elif doc_length < 50:  # Very short docs often lack context
+                quality_score -= 2
             
-            # Penalty for very short docs
-            length_penalty = -2 if len(doc_text) < 100 else 0
+            # 5. Calculate final score
+            total_score = (
+                word_overlap_ratio * 10 +  # Most important: word overlap ratio
+                phrase_score * 2 +         # Exact word matches
+                question_type_bonus +      # Question type relevance
+                quality_score              # Document quality
+            )
             
-            # Total score
-            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
-            
-            if total_score > 0:
+            # Only include docs with meaningful relevance
+            if total_score > 1.0:  # Reasonable threshold
                 filtered_docs.append((doc_meta, total_score))
         
         # Sort by score and take top 15
@@ -749,156 +1116,6 @@ async def retrieve_context_for_gemini(question: str, deps: RAGDeps) -> str:
     print("--- Context Provided to Gemini ---")
     return _format_context_parts(final_docs, final_metadatas)
 
-    # --- Initial Retrieval Step --- 
-    initial_n_results = 50  # Mehr Kandidaten für bessere Abdeckung
-    print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
-
-    # Intelligente Embedding-Auswahl basierend auf Collection-Typ
-    try:
-        collection = get_or_create_collection(
-            client=deps.chroma_client,
-            collection_name=deps.collection_name
-        )
-        
-        # Prüfe die Collection-Dimensionen durch Abrufen eines Beispiel-Dokuments
-        collection_embedding_dim = None
-        try:
-            sample = collection.get(limit=1, include=["embeddings"])
-            if sample["embeddings"] is not None and len(sample["embeddings"]) > 0:
-                collection_embedding_dim = len(sample["embeddings"][0])
-                print(f"---> Detected collection embedding dimension: {collection_embedding_dim}")
-        except Exception as e:
-            print(f"Could not detect collection embedding dimension: {e}")
-        
-        # Wähle die passende Embedding-Methode
-        query_embedding_for_chroma = None
-        
-        if collection_embedding_dim == 384:
-            # Collection verwendet ChromaDB Default Embeddings
-            print("---> Using ChromaDB default embeddings for query (384D)")
-            # Verwende ChromaDB's eingebaute Embedding-Funktion durch query_texts
-            query_embedding_for_chroma = None  # Signal für query_texts usage
-        else:
-            # Collection verwendet wahrscheinlich Vertex AI Embeddings
-            print("---> Using Vertex AI embeddings for query")
-            query_embedding_for_chroma = get_vertex_text_embedding(
-                text=hypothetical_answer,
-                model_name=deps.embedding_model_name,
-                task_type="RETRIEVAL_QUERY",
-                project_id=deps.vertex_project_id,
-                location=deps.vertex_location
-            )
-            if query_embedding_for_chroma is None:
-                return "Error generating query embedding with Vertex AI."
-        
-    except Exception as e:
-        raise RetrievalError(f"Failed to access collection for embedding detection: {e}") from e
-
-    try:
-        # Query-Ausführung basierend auf Embedding-Typ
-        if query_embedding_for_chroma is None:
-            # Verwende ChromaDB Default Embeddings
-            results = collection.query(
-                query_texts=[hypothetical_answer],
-                n_results=initial_n_results,
-                include=['metadatas', 'documents']
-            )
-            print("---> Query executed with ChromaDB default embeddings")
-        else:
-            # Verwende Vertex AI Embeddings
-            results = collection.query(
-                query_embeddings=[query_embedding_for_chroma],
-                n_results=initial_n_results,
-                include=['metadatas', 'documents']
-            )
-            print("---> Query executed with Vertex AI embeddings")
-            
-        if not results or not results.get('ids') or not results['ids'][0]:
-             return "No relevant context found."
-             
-        # Debug: Zeige gefundene Chunks für bessere Diagnose
-        print(f"---> Found {len(results['documents'][0])} chunks for Gemini")
-        for i, (doc, metadata) in enumerate(zip(results['documents'][0][:3], results['metadatas'][0][:3])):
-            url = metadata.get('url', 'No URL')
-            preview = doc[:150].replace('\n', ' ')
-            print(f"  [{i+1}] {url}: {preview}...")
-            
-    except Exception as e:
-        raise RetrievalError(f"Failed to retrieve documents from ChromaDB: {e}") from e
-
-    # --- Re-ranking Step ---
-    initial_docs_texts = results['documents'][0]
-    initial_metadatas = results['metadatas'][0]
-    
-    # Combine documents and metadata for easier handling
-    initial_docs_with_meta = [
-        {"document": doc, "metadata": meta} 
-        for doc, meta in zip(initial_docs_texts, initial_metadatas)
-    ]
-
-    if deps.use_vertex_reranker and deps.vertex_reranker_model:
-        reranked_results = await rerank_with_vertex_ai(
-            query=question,
-            documents=initial_docs_with_meta,
-            model_name=deps.vertex_reranker_model,
-            top_n=10
-        )
-        final_docs = [item['document'] for item in reranked_results]
-        final_metadatas = [item['metadata'] for item in reranked_results]
-    else:
-        print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
-        # Erweiterte Fallback-Filterung mit mehreren Kriterien
-        filtered_docs = []
-        query_words = set(question.lower().split())
-        
-        # Entferne Stoppwörter für bessere Relevanz
-        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
-        query_words = query_words - stop_words
-        
-        for doc_meta in initial_docs_with_meta:
-            doc_text = doc_meta['document'].lower()
-            doc_words = set(doc_text.split()) - stop_words
-            
-            # Mehrere Relevanz-Kriterien
-            word_overlap = len(query_words.intersection(doc_words))
-            
-            # Bonus für exakte Phrasen-Matches
-            phrase_bonus = 0
-            for word in query_words:
-                if word in doc_text:
-                    phrase_bonus += 2  # Höherer Bonus für exakte Matches
-            
-            # Bonus für wichtige Keywords (falls in der Frage)
-            keyword_bonus = 0
-            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
-            for word in important_words:
-                if word in doc_text and any(w in question.lower() for w in [word, 'definiert', 'definition']):
-                    keyword_bonus += 3
-            
-            # Bonus für Dokumentlänge (mehr Inhalt = potentiell mehr Info)
-            length_bonus = min(len(doc_text) / 1000, 1.5)  # Max 1.5 Punkte für Länge
-            
-            # Malus für sehr kurze Dokumente (oft wenig informativ)
-            length_penalty = -2 if len(doc_text) < 100 else 0
-            
-            # Gesamtscore
-            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
-            
-            if total_score > 0:  # Nur Docs mit positivem Score
-                filtered_docs.append((doc_meta, total_score))
-        
-        # Sortiere nach Score und nimm die besten 15 (mehr Kontext für bessere Antworten)
-        filtered_docs.sort(key=lambda x: x[1], reverse=True)
-        top_filtered = filtered_docs[:15]
-        
-        final_docs = [item[0]['document'] for item in top_filtered]
-        final_metadatas = [item[0]['metadata'] for item in top_filtered]
-        
-        print(f"---> Enhanced filtering: {len(final_docs)} most relevant chunks")
-        print(f"---> Top 3 scores: {[f'{item[1]:.1f}' for item in top_filtered[:3]]}")
-
-    print("--- Context Provided to Gemini ---")
-    return _format_context_parts(final_docs, final_metadatas)
 
 def main():
     """Main function to parse arguments, set up dependencies, and run the RAG agent."""
