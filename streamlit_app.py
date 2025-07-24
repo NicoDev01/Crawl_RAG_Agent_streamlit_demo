@@ -28,23 +28,15 @@ if sys.platform == 'win32':
 
 # Streamlit Konfiguration
 st.set_page_config(
-    page_title="🤖 RAG Knowledge Assistant",
+    page_title="🤖 CraCha - Crawl Chat Agent",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS für besseres Design
+# Custom CSS für minimalistisches Design
 st.markdown("""
 <style>
-    .main-header {
-        text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
     .feature-card {
         background: #f8f9fa;
         padding: 1.5rem;
@@ -52,6 +44,8 @@ st.markdown("""
         border-left: 4px solid #667eea;
         margin: 1rem 0;
     }
+    
+    /* Standard Button Styling */
     .stButton > button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -60,6 +54,43 @@ st.markdown("""
         padding: 0.5rem 1rem;
         font-weight: bold;
     }
+    
+    /* Hervorgehobener Submit Button */
+    .stFormSubmitButton > button {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.75rem 2rem !important;
+        font-weight: bold !important;
+        font-size: 1.1rem !important;
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stFormSubmitButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6) !important;
+    }
+    
+    /* Verhindere Duplikation während Processing */
+    .stSpinner {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        z-index: 9999 !important;
+        background: rgba(255, 255, 255, 0.9) !important;
+        padding: 2rem !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* Verhindere Overlay-Duplikation */
+    .stForm {
+        position: relative !important;
+    }
+    
     .chat-container {
         background: white;
         border-radius: 10px;
@@ -109,11 +140,11 @@ def get_crawler_client():
         return None
 
 def main():
-    # Header
+    # Dezenter Header
     st.markdown("""
-    <div class="main-header">
-        <h1>🤖 RAG Knowledge Assistant</h1>
-        <p>Erstelle intelligente Wissensdatenbanken aus Webseiten und chatte mit deinen Daten</p>
+    <div style="text-align: center; padding: 1rem 0; margin-bottom: 1.5rem;">
+        <h2 style="color: #667eea; margin-bottom: 0.5rem;">🤖 CraCha - Crawl Chat Agent</h2>
+        <p style="color: #666; font-size: 0.9rem; margin: 0;">Intelligente Wissensdatenbanken aus Webseiten erstellen</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -137,14 +168,12 @@ def main():
         chat_interface(chroma_client)
 
 def create_knowledge_base(crawler_client, chroma_client):
-    """Benutzerfreundliche Wissensdatenbank-Erstellung."""
+    """Minimalistisches Interface für Wissensdatenbank-Erstellung."""
     
-    st.markdown("""
-    <div class="feature-card">
-        <h3>📖 Neue Wissensdatenbank erstellen</h3>
-        <p>Erstelle eine durchsuchbare Wissensdatenbank aus Webseiten-Inhalten. Bestimme selbst, wie viele Seiten und wie tief gecrawlt werden soll!</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Wenn Processing läuft, zeige nur den Progress
+    if 'processing' in st.session_state and st.session_state.processing:
+        st.info("🔄 Verarbeitung läuft... Bitte warten.")
+        return
     
     # Hilfe-Sektion
     with st.expander("💡 Hilfe: Welche Einstellungen soll ich wählen?"):
@@ -218,7 +247,7 @@ def create_knowledge_base(crawler_client, chroma_client):
                 help="Website Crawling = konfigurierbare Tiefe und Seitenzahl, Sitemap = automatische Erkennung aller URLs"
             )
             
-            # URL Status Indicator
+            # URL Status Indicator (nur bei Eingabe)
             if url and url.strip():
                 url_validation = getattr(st.session_state, 'url_validation_result', None)
                 if url_validation:
@@ -231,19 +260,15 @@ def create_knowledge_base(crawler_client, chroma_client):
                             st.success(f"{status_indicator} URL Status: Gültig")
                     else:
                         st.error(f"{status_indicator} URL Status: Ungültig")
-                else:
-                    st.info("🔄 URL wird validiert...")
-            else:
-                st.info("⏳ Warte auf URL-Eingabe...")
+
         
         # Crawling-Einstellungen für alle Typen
         st.subheader("⚙️ Crawling-Einstellungen")
         
         # Typ-spezifische Informationen
-        if source_type == "Website Crawling":
-            st.info("🌐 Crawlt Webseiten mit konfigurierbarer Tiefe und Seitenzahl")
+
         elif source_type == "Sitemap":
-            st.success("�️ Cratwlt alle URLs aus der Sitemap - ideal für vollständige Websites")
+
             st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
         
         # Gemeinsame Crawling-Einstellungen für alle Typen
@@ -344,7 +369,7 @@ def create_knowledge_base(crawler_client, chroma_client):
         # Form submission with enhanced validation
         submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
         
-        if submitted:
+        if submitted and 'processing' not in st.session_state:
             # Enhanced validation before processing
             validation_errors = []
             
@@ -371,16 +396,21 @@ def create_knowledge_base(crawler_client, chroma_client):
                     st.warning(f"⚠️ **Warnung:** {url_validation.warning_message}")
                     st.info("Das Crawling wird trotzdem fortgesetzt...")
                 
+                # Set processing state to prevent duplication
+                st.session_state.processing = True
+                
                 # Proceed with knowledge base creation
                 create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
 
 def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth=2, max_concurrent=5):
     """Prozess der Wissensdatenbank-Erstellung."""
     
-    # Progress Container
-    progress_container = st.container()
+    # Leere die Seite und zeige nur Progress
+    st.empty()
     
-    with progress_container:
+    # Progress Container - isoliert von der Form
+    with st.container():
+        st.markdown("---")
         st.info("🔄 Erstelle deine Wissensdatenbank...")
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -441,6 +471,10 @@ def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size,
             
             st.info("💡 Wechsle zum 'Chat' Tab um mit deiner Wissensdatenbank zu interagieren!")
             
+            # Reset processing state
+            if 'processing' in st.session_state:
+                del st.session_state.processing
+            
         except Exception as e:
             progress_bar.empty()
             status_text.empty()
@@ -448,6 +482,10 @@ def create_knowledge_base_process(url, name, source_type, max_pages, chunk_size,
             
             if "Memory limit exceeded" in str(e):
                 st.info("💡 Tipp: Versuche eine kleinere Chunk-Größe oder weniger Seiten.")
+            
+            # Reset processing state on error
+            if 'processing' in st.session_state:
+                del st.session_state.processing
 
 def chat_interface(chroma_client):
     """Benutzerfreundliche Chat-Oberfläche."""
