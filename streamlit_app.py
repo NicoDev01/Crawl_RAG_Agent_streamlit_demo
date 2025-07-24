@@ -265,10 +265,8 @@ def create_knowledge_base(crawler_client, chroma_client):
         # Crawling-Einstellungen für alle Typen
         st.subheader("⚙️ Crawling-Einstellungen")
         
-        # Typ-spezifische Informationen
-
-        elif source_type == "Sitemap":
-
+        # Typ-spezifische Informationen (nur für Sitemap)
+        if source_type == "Sitemap":
             st.info("💡 Sitemap-URLs enden meist mit '/sitemap.xml' oder '/sitemap_index.xml'")
         
         # Gemeinsame Crawling-Einstellungen für alle Typen
