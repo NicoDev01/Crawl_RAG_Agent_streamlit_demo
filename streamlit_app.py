@@ -141,13 +141,38 @@ def get_crawler_client():
         return None
 
 def main():
-    # Dezenter Header
+    # Dezenter Header mit Blog-Link
     st.markdown("""
     <div style="text-align: center; padding: 1rem 0; margin-bottom: 1.5rem;">
         <h2 style="color: #667eea; margin-bottom: 0.5rem;">🤖 CraCha - Crawl Chat Agent</h2>
         <p style="color: #666; font-size: 0.9rem; margin: 0;">Intelligente Wissensdatenbanken aus Webseiten erstellen</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Blog-Artikel Button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <a href="https://seed-vanilla-a45.notion.site/CraCha-Crawl-Chat-RAG-Agent-23a3f68d746880df9b28f0db73f6f6f0" target="_blank" style="text-decoration: none;">
+                <button style="
+                    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 0.5rem 1.5rem;
+                    font-weight: bold;
+                    font-size: 0.9rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'" 
+                   onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.3)'">
+                    📖 Zum Blog-Artikel über CraCha
+                </button>
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Initialisiere Services (im Hintergrund)
     setup_google_cloud_credentials()
