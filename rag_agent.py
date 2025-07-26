@@ -103,8 +103,8 @@ class DocumentChunk(BaseModel):
         """Ensure content is not empty and has reasonable length."""
         if not v.strip():
             raise ValueError("Document content cannot be empty")
-        if len(v.strip()) < 10:
-            raise ValueError("Document content too short (minimum 10 characters)")
+        if len(v.strip()) < 3:
+            raise ValueError("Document content too short (minimum 3 characters)")
         return v.strip()
     
     @validator('chunk_id')
@@ -1019,42 +1019,40 @@ class RAGDeps:
 
 # Define the system prompt as a separate variable
 SYSTEM_PROMPT_TEMPLATE = (
-    "## Deine Rolle: Spezialisierter und auf Quellen basis arbeitender Q&A-Assistent\n"
-    "Du bist ein hochspezialisierter KI-Assistent. Deine EINZIGE Aufgabe ist es, Fragen präzise und ausschließlich auf Basis des unten bereitgestellten Kontexts aus Webseiten oder Dokumenten zu beantworten. Du darfst unter KEINEN Umständen externes Wissen verwenden.\n\n"
+    "Du bist ein **präziser Faktenanalyst**. Deine Kernkompetenz ist es, aus einem gegebenen Kontext die maximale Menge an **spezifischen, überprüfbaren Details** zu extrahieren und diese in einer klaren, gut strukturierten Form zu präsentieren. Deine Antwort muss **ausschließlich auf dem bereitgestellten Kontext basieren**.\n\n"
+
+    "**Aufgabe:** Beantworte die folgende Anfrage als detaillierte und faktenbasierte Analyse.\n\n"
     
-    "## Kernanweisungen (Regeln):\n"
-    "1.  **IMMER zuerst den `retrieve` Befehl nutzen:** Bevor du eine Frage beantwortest, die Informationen erfordert, MUSST du das `retrieve`-Tool verwenden, um den relevanten Kontext abzurufen. Antworte niemals aus dem Gedächtnis. Die einzige Ausnahme sind rein konversationelle Fragen (z.B. 'Hallo').\n"
-    "2.  **100% kontextbasiert arbeiten:** Deine Antwort MUSS zu 100% auf den Informationen im `--- KONTEXT ---`-Block basieren. Füge keine Informationen hinzu, interpretiere nichts hinein und mache keine Annahmen.\n"
-    "3.  **Intelligente Auswahl:** Du erhältst viele Kontext-Teile zur Auswahl. Wähle die relevantesten aus und kombiniere sie zu einer umfassenden und gut strukturierten Antwort. Du musst NICHT alle Chunks verwenden - fokussiere auf die wichtigsten für die Frage.\n"
-    "4.  **Umgang mit fehlenden Informationen:** Wenn der Kontext die Antwort nicht enthält, MUSST du das klar sagen. Beispiel: 'Die bereitgestellten Dokumente enthalten keine Informationen zu diesem Thema.'\n\n"
+    "**Anfrage:** {question}\n\n"
     
-    "## Antwort-Stil und Formatierung:\n"
-    "- **Klickbare Quellenverweise:** Verwende IMMER Zahlen in klammer als KLICKBARE beziehungsweise HYPERLINKS im Format [(¹)](URL LINK), [(²)](URL LINK) etc. im Fließtext. NIEMALS nur hochgestellte Zahlen ohne Links verwenden.\n"
-    "- **Strukturierung:** Nutze prägnante Überschriften. Fasse jeden Aspekt zusammen, lasse aber kein wichtigen fakt aus, dann optional ein kurzer Zusatz-Fakt.\n"
-    "- **Schreibstil:** Formuliere neutral-sachlich und professionell. Wenn sinnvoll, nutze Stichpunkte.\n"
-    "- **Konsistenz:** Halte die gleiche Detailtiefe und Formatierung wie in der ersten Antwort bei. Jede Antwort soll vollständig und umfassend sein.\n"
-    "- **Fazit-Regel:** Schließe mit einem knappen Satz, warum das Wissen praktisch nützt oder welche Fehlvorstellung es korrigiert.\n\n"
+    "**Anforderungen an deine Antwort (Qualitätsmerkmale):**\n"
+    "**1. Priorität: Maximale Faktendichte und Granularität:**\n"
+    "    - **Dein primäres Ziel ist es, allgemeine Aussagen zu vermeiden.** Ersetze jede allgemeine Formulierung durch die spezifischsten Informationen, die der Kontext bietet.\n"
+    "    - **Integriere proaktiv und mit hoher Dichte die folgenden Detailtypen:**\n"
+    "        - **Quantitative Daten:** Konkrete Zahlen, Statistiken, Geldbeträge, Höhenangaben, Prozentwerte.\n"
+    "        - **Namen und Eigennamen:** Spezifische Personen, Organisationen, Gesetze, Programme, Technologien.\n"
+    "        - **Chronologische Marker:** Genaue Jahreszahlen oder Daten für Ereignisse und Meilensteine.\n"
+    "        - **Technische/Kausale Details:** Kurze Erklärungen für das 'Warum', 'Was', 'Weshalb', 'Wieso' oder 'Wie', falls im Kontext vorhanden.\n"
+    "    - **Leitprinzip:** Lieber eine spezifische, aber enger gefasste Antwort, die vor Details strotzt, als eine breite, aber oberflächliche Antwort.\n"
+
+    "**2. Umfassende thematische Struktur (als Rahmen für die Fakten):**\n"
+    "    - Ordne die extrahierten Fakten in eine logische und umfassende Struktur ein. Beleuchte dabei, falls im Kontext enthalten, Aspekte wie historische Entwicklung, aktuelle Situation, zukünftige Konzepte und Auswirkungen (positiv/negativ).\n"
+    "    - Diese Struktur dient als Gerüst, das mit den unter Punkt 1 geforderten, dichten Fakten gefüllt wird.\n"
     
-    "## Dein Arbeitsprozess:\n"
-    "1.  Analysiere die Nutzerfrage.\n"
-    "2.  Rufe mit dem `retrieve`-Tool den Kontext ab.\n"
-    "3.  **Kontext-Analyse:** Durchsuche alle bereitgestellten Kontext-Teile und identifiziere passend zur Frage die relevanten Informationen.\n"
-    "4.  **Intelligente Synthese:** Kombiniere die besten Informationen aus verschiedenen Quellen zu einer umfassenden Antwort.\n"
-    "5.  Füge am Ende unter '**Quellen:**' mit absatz nur die tatsächlich verwendeten Quellen auf. 1) https://example.com/quelle1\n 2) https://example.com/quelle2\n\n"
+    "**3. Exzellente Lesbarkeit:**\n"
+    "    - Gliedere deine Antwort mit klaren, aussagekräftigen Überschriften (z.B. `## Hauptthema`, `### Unterpunkt`).\n"
+    "    - Beginne mit einer kurzen Einleitung, die den Rahmen setzt, und schließe mit einem prägnanten Fazit, das die wichtigsten Fakten zusammenfasst.\n"
+    "    - Nutze Aufzählungen (`• Liste Item`) oder nummerierte Listen (`1. Liste Item`) zur übersichtlichen Darstellung von konkreten Fakten.\n"
     
-    "## Formatierungs-Richtlinien:\n"
-    "- **Überschriften:** Verwende ### für Hauptaspekte (z.B. 'Definition', 'Eigenschaften', 'Anwendung')\n"
-    "- **Zitationen:** Setze Quellenverweise als klickbare hyperlinks: [(¹)](URL), [(²)](URL) direkt im Text\n"
-    "- **Struktur:** Organisiere Informationen logisch nach Relevanz für die Frage\n"
-    "- **Quellen-Sektion:** Schließe mit '**Quellen:**\n' und liste dadrunter alle verwendeten URLs auf 1) https://example.com/quelle1\n \n"
-    "- **Flexibilität:** Passe Struktur und Inhalt an die spezifische Frage an - nicht jede Antwort braucht dieselben Abschnitte\n\n"
-    
+    "**4. Strikte Sachlichkeit und Quellenintegration:**\n"
+    "    - Deine Antwort MUSS zu 100% auf den Informationen im `--- KONTEXT ---` basieren. Erfinde oder schlussfolgere keine Informationen, die nicht explizit genannt werden.\n"
+    "    - Belege jede Information direkt im Text mit klickbaren Quellenverweisen, auch von sprungmarken innerhalb einer Website im Format `[Nummer](URL)`. Die Referenznummern (z.B. `[Quelle 1]`) und die zugehörigen URLs findest du im Kontext. Wandle 'Quelle X' in die reine Zahl 'X' um.\n"
+    "    - Führe am Ende unter der Überschrift `## Quellen` nur die tatsächlich zitierten Quellen und ihre URLs auf.\n"
+    "    - Wenn der Kontext keine ausreichenden Informationen zur Beantwortung der Frage zulässt, antworte klar: 'Basierend auf den verfügbaren Informationen kann ich diese Frage nicht vollständig beantworten.' oder 'Der bereitgestellte Kontext enthält keine Informationen zu dieser Frage.'\n\n"
+
     "--- KONTEXT ---\n"
     "{context}\n"
-    "--- END KONTEXT ---\n\n"
-    
-    "Beantworte nun die folgende Frage *ausschließlich* auf Basis des oben stehenden Kontexts.\n"
-    "Frage: {question}"
+    "--- END KONTEXT ---\n"
 )
 
 # Configure primary and fallback models
@@ -1266,23 +1264,27 @@ async def generate_query_variations_tool(
     
     # Adaptive variation generation
     if strategy == QueryStrategy.SIMPLE:
-        variation_prompt = f"""Generate 1 alternative way to ask this simple question. Keep it focused and direct, don't expand the scope.
+        variation_prompt = f"""Generate 1 alternative way to ask this question using different words and synonyms for better search coverage.
         
         Original question: {original_query}
         
+        Focus on using alternative terminology while keeping the same meaning.
         Return only the 1 variation without numbering or explanation."""
         max_variations = 1
     elif strategy == QueryStrategy.MODERATE:
-        variation_prompt = f"""Generate 2 different ways to ask the same question for better search results. 
-        Make them semantically different but asking for the same core information.
+        variation_prompt = f"""Generate 2 different ways to ask the same question using varied vocabulary for comprehensive search:
+        1. One using synonyms and alternative terms
+        2. One using more specific or technical language
         
         Original question: {original_query}
         
         Return only the 2 variations, one per line, without numbering or explanation."""
         max_variations = 2
     else:  # COMPLEX
-        variation_prompt = f"""Generate 3 different ways to ask this complex question for comprehensive search results. 
-        Make them semantically different but asking for the same detailed information.
+        variation_prompt = f"""Generate 3 comprehensive variations of this question for maximum search coverage:
+        1. One using synonyms and alternative terminology
+        2. One using more specific/technical terms  
+        3. One that rephrases the core concepts differently
         
         Original question: {original_query}
         
@@ -1313,7 +1315,7 @@ async def generate_query_variations_tool(
 async def retrieve_documents_structured(
     ctx: RunContext[RAGDeps], 
     query_variations: QueryVariations,
-    n_results: int = 15
+    n_results: int = 25
 ) -> RetrievalResult:
     """Structured retrieval tool with multi-query support and comprehensive metadata."""
     import time
@@ -1331,7 +1333,7 @@ async def retrieve_documents_structured(
     # --- Parallel HyDE Generation for all queries ---
     async def generate_hyde_for_query(query: str) -> str:
         """Generate hypothetical answer for a single query."""
-        hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Focus on providing factual information that would typically be found in documentation, articles, or informational content. Question: {query}"
+        hyde_prompt = f"Generate a detailed, plausible paragraph that directly answers the following question as if it were extracted from a relevant document or webpage. Use varied terminology and synonyms that might appear in different sources. Include both formal and informal ways of expressing the same concepts. Question: {query}"
         
         try:
             hypothetical_answer = await run_agent_with_fallback(
@@ -1364,14 +1366,17 @@ async def retrieve_documents_structured(
         # Get total document count
         total_documents = collection.count()
         
-        # Detect embedding method
+        # Detect embedding method - mit besserer Fehlerbehandlung
         collection_embedding_dim = None
         try:
             sample = collection.get(limit=1, include=["embeddings"])
             if sample["embeddings"] is not None and len(sample["embeddings"]) > 0:
                 collection_embedding_dim = len(sample["embeddings"][0])
-        except Exception:
-            pass
+                print(f"---> Detected embedding dimension: {collection_embedding_dim}")
+            else:
+                print("---> No embeddings found in collection, using text-based search")
+        except Exception as e:
+            print(f"---> Embedding detection failed: {e}, falling back to text search")
         
         # Parallel retrieval for all HyDE answers
         async def retrieve_for_hyde(hyde_answer: str) -> Tuple[List[str], List[Dict]]:
@@ -1397,26 +1402,79 @@ async def retrieve_documents_structured(
                         print(f"🎯 Embedding cache HIT for: {hyde_answer[:30]}...")
                 
                 if query_embedding is None:
+                    # Generate consistent embedding with proper task_type
                     query_embedding = get_vertex_text_embedding(
                         text=hyde_answer,
                         model_name=ctx.deps.embedding_model_name,
-                        task_type="RETRIEVAL_QUERY",
+                        task_type="RETRIEVAL_QUERY",  # Consistent task type for queries
                         project_id=ctx.deps.vertex_project_id,
                         location=ctx.deps.vertex_location
                     )
                     if query_embedding and cache_enabled:
+                        # Normalize embedding before caching (L2 normalization)
+                        import numpy as np
+                        query_vec = np.array(query_embedding)
+                        query_embedding = (query_vec / np.linalg.norm(query_vec)).tolist()
                         embedding_cache.store(hyde_answer, query_embedding)
                         if ctx.deps.cache_config and ctx.deps.cache_config.cache_hit_logging:
-                            print(f"💾 Embedding cached for: {hyde_answer[:30]}...")
+                            print(f"💾 Normalized embedding cached for: {hyde_answer[:30]}...")
                 
                 if query_embedding is None:
-                    return [], []
-                
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=initial_n_results,
-                    include=['metadatas', 'documents']
-                )
+                    # Fallback auf Text-basierte Suche wenn Embedding fehlschlägt
+                    print(f"⚠️ Embedding failed, using text-based fallback for: {hyde_answer[:30]}...")
+                    results = collection.query(
+                        query_texts=[hyde_answer],
+                        n_results=initial_n_results,
+                        include=['metadatas', 'documents']
+                    )
+                else:
+                    # HYBRID RETRIEVAL: Combine semantic + text search for better recall
+                    print(f"🔍 Using hybrid retrieval (semantic + text) for: {hyde_answer[:30]}...")
+                    
+                    # Semantic search with normalized embedding
+                    semantic_results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=initial_n_results // 2,  # Half from semantic
+                        include=['metadatas', 'documents', 'distances']
+                    )
+                    
+                    # Text-based search for keyword matches (BM25-like)
+                    text_results = collection.query(
+                        query_texts=[hyde_answer],
+                        n_results=initial_n_results // 2,  # Half from text
+                        include=['metadatas', 'documents']
+                    )
+                    
+                    # Combine results (simple merge - could be improved with score fusion)
+                    if semantic_results['documents'][0] and text_results['documents'][0]:
+                        combined_docs = semantic_results['documents'][0] + text_results['documents'][0]
+                        combined_metas = semantic_results['metadatas'][0] + text_results['metadatas'][0]
+                        
+                        # Simple deduplication
+                        seen_docs = set()
+                        final_docs = []
+                        final_metas = []
+                        
+                        for doc, meta in zip(combined_docs, combined_metas):
+                            # Improved deduplication: full content hash + length
+                            import hashlib
+                            content_hash = hashlib.md5(doc.encode('utf-8')).hexdigest()
+                            content_length = len(doc)
+                            dedup_key = f"{content_hash}_{content_length}"
+                            
+                            if dedup_key not in seen_docs:
+                                seen_docs.add(dedup_key)
+                                final_docs.append(doc)
+                                final_metas.append(meta)
+                        
+                        results = {
+                            'documents': [final_docs[:initial_n_results]],
+                            'metadatas': [final_metas[:initial_n_results]]
+                        }
+                        print(f"---> Hybrid retrieval: {len(final_docs)} unique results")
+                    else:
+                        # Fallback to whichever worked
+                        results = semantic_results if semantic_results['documents'][0] else text_results
             
             if results and results.get('documents') and results['documents'][0]:
                 return results['documents'][0], results['metadatas'][0]
@@ -1425,6 +1483,23 @@ async def retrieve_documents_structured(
         # Retrieve for all HyDE answers in parallel
         retrieval_results = await asyncio.gather(*[retrieve_for_hyde(hyde) for hyde in hyde_answers])
         
+        # Zusätzlicher Text-Fallback wenn keine Ergebnisse
+        total_results = sum(len(docs) for docs, _ in retrieval_results)
+        if total_results == 0:
+            print("🚨 Keine Embedding-Ergebnisse - versuche direkten Text-Fallback...")
+            try:
+                # Direkte Text-Suche mit Original-Query
+                text_results = collection.query(
+                    query_texts=[query_variations.original_query],
+                    n_results=initial_n_results,
+                    include=['metadatas', 'documents']
+                )
+                if text_results and text_results.get('documents') and text_results['documents'][0]:
+                    retrieval_results.append((text_results['documents'][0], text_results['metadatas'][0]))
+                    print(f"---> Text-Fallback fand {len(text_results['documents'][0])} zusätzliche Dokumente")
+            except Exception as e:
+                print(f"---> Text-Fallback fehlgeschlagen: {e}")
+        
         # Combine and deduplicate results
         all_docs = []
         all_metadatas = []
@@ -1432,10 +1507,14 @@ async def retrieve_documents_structured(
         
         for docs, metadatas in retrieval_results:
             for doc, metadata in zip(docs, metadatas):
-                # Simple deduplication based on content hash
-                doc_hash = hash(doc[:100])  # Use first 100 chars for deduplication
-                if doc_hash not in seen_docs:
-                    seen_docs.add(doc_hash)
+                # Improved deduplication: full content hash + length check
+                import hashlib
+                content_hash = hashlib.md5(doc.encode('utf-8')).hexdigest()
+                content_length = len(doc)
+                dedup_key = f"{content_hash}_{content_length}"
+                
+                if dedup_key not in seen_docs:
+                    seen_docs.add(dedup_key)
                     all_docs.append(doc)
                     all_metadatas.append(metadata)
         
@@ -1445,6 +1524,11 @@ async def retrieve_documents_structured(
         raise RetrievalError(f"Failed to retrieve documents: {e}") from e
     
     if not all_docs:
+        print("🚨 WARNING: No documents retrieved from ChromaDB!")
+        print(f"---> Collection has {total_documents} total documents")
+        print(f"---> Queries used: {[q[:50] + '...' for q in all_queries]}")
+        print(f"---> HyDE answers: {[h[:50] + '...' for h in hyde_answers]}")
+        
         # Return empty result
         empty_ranked_docs = RankedDocuments(
             documents=[],
@@ -1485,49 +1569,128 @@ async def retrieve_documents_structured(
             print(f"Error creating document chunk {i}: {e}")
             continue
     
-    # --- Apply unified relevance filtering ---
-    print("🎯 Applying relevance filtering...")
+    # --- HIGH RECALL: Minimal filtering with entropy check ---
+    print("🎯 Applying high-recall minimal filtering with entropy check...")
+    
+    def calculate_content_entropy(text: str) -> float:
+        """Calculate content entropy to filter out boilerplate."""
+        import re
+        from collections import Counter
+        
+        # Normalize text: remove special chars, lowercase
+        normalized = re.sub(r'[^\w\s]', ' ', text.lower())
+        words = normalized.split()
+        
+        if len(words) < 3:
+            return 0.0
+        
+        # Calculate word frequency entropy
+        word_counts = Counter(words)
+        total_words = len(words)
+        entropy = 0.0
+        
+        for count in word_counts.values():
+            prob = count / total_words
+            if prob > 0:
+                entropy -= prob * np.log2(prob)
+        
+        return entropy
+    
+    def is_boilerplate_content(text: str) -> bool:
+        """Detect boilerplate content (cookie banners, footers, etc.)."""
+        text_lower = text.lower().strip()
+        
+        # Common boilerplate patterns
+        boilerplate_patterns = [
+            r'©\s*\d{4}',  # Copyright notices
+            r'cookie.*accept',  # Cookie banners
+            r'privacy.*policy',  # Privacy links
+            r'terms.*service',  # Terms links
+            r'all rights reserved',  # Copyright text
+            r'powered by',  # Powered by notices
+            r'follow us on',  # Social media
+        ]
+        
+        boilerplate_count = sum(1 for pattern in boilerplate_patterns 
+                               if re.search(pattern, text_lower))
+        
+        # High stop-word ratio indicates boilerplate
+        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 
+                     'was', 'wie', 'wo', 'wann', 'warum', 'mit', 'von', 'zu', 'für'}
+        words = text_lower.split()
+        if len(words) > 0:
+            stop_word_ratio = len([w for w in words if w in stop_words]) / len(words)
+        else:
+            stop_word_ratio = 0
+        
+        return boilerplate_count >= 2 or stop_word_ratio > 0.7
+    
+    # Enhanced filtering with entropy and boilerplate detection
     filtered_chunks = []
+    seen_content_hashes = set()
     
     for chunk in document_chunks:
-        # Calculate relevance score based on query overlap
-        query_words = set(query_variations.original_query.lower().split())
-        doc_words = set(chunk.content.lower().split())
+        content = chunk.content.strip()
         
-        # Remove stop words
-        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
-        query_words = query_words - stop_words
-        doc_words = doc_words - stop_words
+        # Improved deduplication: full content hash + length check
+        import hashlib
+        content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
+        content_length = len(content)
+        dedup_key = f"{content_hash}_{content_length}"
         
-        if not query_words:
-            relevance_score = 0.1
-        else:
-            word_overlap = len(query_words.intersection(doc_words))
-            relevance_score = word_overlap / len(query_words)
+        if dedup_key in seen_content_hashes:
+            continue
+        seen_content_hashes.add(dedup_key)
         
-        # Additional scoring factors
-        content_length = len(chunk.content)
-        if 200 <= content_length <= 2000:
-            length_bonus = 0.1
-        elif content_length < 50:
-            length_bonus = -0.2
-        else:
-            length_bonus = 0.0
+        # Enhanced micro-chunk filtering
+        if len(content) < 30:  # Increased from 20 to 30 chars
+            continue
         
-        final_score = min(relevance_score + length_bonus, 1.0)
+        # Entropy-based quality filter
+        entropy = calculate_content_entropy(content)
+        if entropy < 1.0:  # Very low entropy = repetitive content
+            continue
         
-        if final_score > 0.05:  # Minimum relevance threshold
-            filtered_chunks.append((chunk, final_score))
+        # Boilerplate detection
+        if is_boilerplate_content(content):
+            continue
+            
+        # Assign minimal score for sorting - actual ranking happens in re-ranking step
+        basic_score = 0.5  # Neutral score, re-ranker will determine actual relevance
+        filtered_chunks.append((chunk, basic_score))
     
-    # Sort by relevance score
-    filtered_chunks.sort(key=lambda x: x[1], reverse=True)
-    top_chunks = filtered_chunks[:n_results]
+    print(f"---> High-recall filtering: {len(filtered_chunks)} chunks (removed duplicates, micro-chunks, boilerplate)")
     
-    print(f"---> Filtered to {len(top_chunks)} most relevant chunks")
+    # Progressive K-Value Strategy: Start conservative, expand if needed
+    def calculate_progressive_k(n_results: int, available_chunks: int, query_complexity: str) -> int:
+        """Calculate optimal candidate pool size based on context."""
+        base_multiplier = 3  # Start conservative
+        
+        # Adjust based on query complexity
+        complexity_multipliers = {
+            "simple": 3,
+            "moderate": 5, 
+            "complex": 8
+        }
+        
+        multiplier = complexity_multipliers.get(query_complexity, 5)
+        initial_k = max(50, n_results * multiplier)
+        
+        # Cap at available chunks and reasonable maximum
+        max_reasonable_k = min(200, available_chunks)
+        return min(initial_k, max_reasonable_k)
     
-    # --- Create ranked documents ---
+    # Determine query complexity from variations
+    query_complexity = query_variations.strategy.value if hasattr(query_variations, 'strategy') else "moderate"
+    candidate_count = calculate_progressive_k(n_results, len(filtered_chunks), query_complexity)
+    
+    candidate_chunks = filtered_chunks[:candidate_count]
+    
+    print(f"---> Progressive K-strategy: {len(candidate_chunks)} candidates (complexity: {query_complexity}, target: {candidate_count})")
+    
+    # --- Create ranked documents from candidate pool ---
     ranked_documents = []
-    for rank, (chunk, score) in enumerate(top_chunks, 1):
+    for rank, (chunk, score) in enumerate(candidate_chunks, 1):
         ranked_doc = RankedDocument(
             document=chunk,
             score=score,
@@ -1535,10 +1698,20 @@ async def retrieve_documents_structured(
         )
         ranked_documents.append(ranked_doc)
     
+    # Calculate confidence metrics for hallucination prevention
+    avg_relevance = sum(d.score for d in ranked_documents) / len(ranked_documents) if ranked_documents else 0.0
+    confidence_threshold = 0.25
+    
+    ranking_method = "high_recall_candidate_generation"
+    if avg_relevance < confidence_threshold:
+        ranking_method += "_low_confidence"
+        print(f"⚠️ Low relevance pool detected (avg: {avg_relevance:.3f} < {confidence_threshold})")
+        print("   → Consider refining search terms or expanding document collection")
+    
     ranked_docs_collection = RankedDocuments(
         documents=ranked_documents,
         total_candidates=len(all_docs),
-        ranking_method="unified_relevance_filter",
+        ranking_method=ranking_method,
         query=query_variations.original_query
     )
     
@@ -1654,85 +1827,109 @@ async def rerank_documents_tool(
             logfire.exception("Vertex AI re-ranking failed", exception=e)
             # Fall through to score-based ranking
     
-    # Fallback: Score-based ranking (improve existing scores)
-    print("🎯 Using enhanced score-based ranking")
+    # Fallback: Domain-agnostic semantic similarity ranking (no token-overlap heuristics)
+    print("🎯 Using domain-agnostic semantic similarity ranking")
     
-    enhanced_documents = []
-    query_words = set(retrieval_result.query_variations.original_query.lower().split())
-    
-    # Remove stop words
-    stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
-    query_words = query_words - stop_words
-    
-    for ranked_doc in retrieval_result.ranked_documents.documents:
-        content = ranked_doc.document.content.lower()
-        content_words = set(content.split()) - stop_words
+    try:
+        # Use embedding-based similarity instead of token overlap heuristics
+        query_embedding = None
+        cache_enabled = (
+            ctx.deps.cache_config is None or 
+            ctx.deps.cache_config.enable_embedding_cache
+        )
         
-        # Enhanced scoring factors
-        base_score = ranked_doc.score
+        if cache_enabled:
+            query_embedding = embedding_cache.get(retrieval_result.query_variations.original_query)
         
-        # 1. Exact phrase matching
-        phrase_bonus = 0.0
-        for word in query_words:
-            if word in content:
-                phrase_bonus += len(word) / 100  # Longer words get higher bonus
+        if query_embedding is None:
+            query_embedding = get_vertex_text_embedding(
+                text=retrieval_result.query_variations.original_query,
+                model_name=ctx.deps.embedding_model_name,
+                task_type="RETRIEVAL_QUERY",
+                project_id=ctx.deps.vertex_project_id,
+                location=ctx.deps.vertex_location
+            )
+            if query_embedding and cache_enabled:
+                embedding_cache.store(retrieval_result.query_variations.original_query, query_embedding)
         
-        # 2. Question type bonus
-        question_type_bonus = 0.0
-        if any(indicator in retrieval_result.query_variations.original_query.lower() 
-               for indicator in ['was ist', 'definition', 'bedeutung']):
-            definition_indicators = ['definition', 'bedeutet', 'bezeichnet', 'versteht man', 'ist ein']
-            for indicator in definition_indicators:
-                if indicator in content:
-                    question_type_bonus += 0.1
-        
-        # 3. Content quality score
-        content_length = len(ranked_doc.document.content)
-        if 200 <= content_length <= 2000:
-            quality_bonus = 0.1
-        elif content_length < 50:
-            quality_bonus = -0.2
+        if query_embedding is None:
+            print("⚠️ Could not generate query embedding, using basic ranking")
+            # Simple fallback without token overlap heuristics
+            enhanced_documents = retrieval_result.ranked_documents.documents[:top_n]
         else:
-            quality_bonus = min(content_length / 2000, 0.1)
+            # Calculate semantic similarity scores
+            enhanced_documents = []
+            
+            for ranked_doc in retrieval_result.ranked_documents.documents:
+                # Get or generate document embedding
+                doc_embedding = ranked_doc.document.embedding
+                
+                if doc_embedding is None:
+                    # Generate consistent embedding for document with proper task_type
+                    doc_embedding = get_vertex_text_embedding(
+                        text=ranked_doc.document.content,
+                        model_name=ctx.deps.embedding_model_name,
+                        task_type="RETRIEVAL_DOCUMENT",  # Consistent task type for documents
+                        project_id=ctx.deps.vertex_project_id,
+                        location=ctx.deps.vertex_location
+                    )
+                    
+                    # Normalize document embedding (L2 normalization)
+                    if doc_embedding is not None:
+                        import numpy as np
+                        doc_vec = np.array(doc_embedding)
+                        doc_embedding = (doc_vec / np.linalg.norm(doc_vec)).tolist()
+                
+                if doc_embedding is not None:
+                    # Calculate cosine similarity (domain-agnostic)
+                    import numpy as np
+                    query_vec = np.array(query_embedding)
+                    doc_vec = np.array(doc_embedding)
+                    
+                    # Normalize vectors
+                    query_vec = query_vec / np.linalg.norm(query_vec)
+                    doc_vec = doc_vec / np.linalg.norm(doc_vec)
+                    
+                    # Cosine similarity
+                    similarity_score = float(np.dot(query_vec, doc_vec))
+                else:
+                    # Fallback to original score if embedding fails
+                    similarity_score = ranked_doc.score
+                
+                enhanced_doc = RankedDocument(
+                    document=ranked_doc.document,
+                    score=similarity_score,
+                    rank=ranked_doc.rank  # Will be updated after sorting
+                )
+                enhanced_documents.append(enhanced_doc)
+            
+            # Sort by semantic similarity score
+            enhanced_documents.sort(key=lambda x: x.score, reverse=True)
         
-        # 4. URL quality (prefer certain domains)
-        url_bonus = 0.0
-        url = ranked_doc.document.metadata.url.lower()
-        if any(domain in url for domain in ['docs.', 'documentation', 'help.', 'support.']):
-            url_bonus = 0.05
+        # Update ranks and take top_n
+        for rank, doc in enumerate(enhanced_documents[:top_n], 1):
+            doc.rank = rank
         
-        # Calculate enhanced score
-        enhanced_score = min(
-            base_score + phrase_bonus + question_type_bonus + quality_bonus + url_bonus,
-            1.0
-        )
+        final_documents = enhanced_documents[:top_n]
         
-        enhanced_doc = RankedDocument(
-            document=ranked_doc.document,
-            score=enhanced_score,
-            rank=ranked_doc.rank  # Will be updated after sorting
-        )
-        enhanced_documents.append(enhanced_doc)
-    
-    # Sort by enhanced score and update ranks
-    enhanced_documents.sort(key=lambda x: x.score, reverse=True)
-    for rank, doc in enumerate(enhanced_documents[:top_n], 1):
-        doc.rank = rank
-    
-    # Take only top_n documents
-    final_documents = enhanced_documents[:top_n]
+    except Exception as e:
+        print(f"❌ Semantic similarity ranking failed: {e}")
+        # Ultimate fallback: use original ranking
+        final_documents = retrieval_result.ranked_documents.documents[:top_n]
+        for rank, doc in enumerate(final_documents, 1):
+            doc.rank = rank
     
     # Create final RankedDocuments collection
     final_collection = RankedDocuments(
         documents=final_documents,
         total_candidates=retrieval_result.ranked_documents.total_candidates,
-        ranking_method="enhanced_score_based",
+        ranking_method="domain_agnostic_semantic_similarity",
         query=retrieval_result.query_variations.original_query
     )
     
-    print(f"✅ Enhanced score-based ranking completed: {len(final_documents)} documents")
+    print(f"✅ Domain-agnostic semantic ranking completed: {len(final_documents)} documents")
     avg_score = sum(d.score for d in final_documents) / len(final_documents) if final_documents else 0
-    print(f"---> Average enhanced score: {avg_score:.3f}")
+    print(f"---> Average semantic similarity score: {avg_score:.3f}")
     
     return final_collection
 
@@ -3919,19 +4116,25 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
             query_embedding_for_chroma = embedding_cache.get(hypothetical_answer)
             
             if query_embedding_for_chroma is None:
-                # Generate new embedding
+                # Generate consistent, normalized embedding
                 query_embedding_for_chroma = get_vertex_text_embedding(
                     text=hypothetical_answer,
                     model_name=context.deps.embedding_model_name,
-                    task_type="RETRIEVAL_QUERY",
+                    task_type="RETRIEVAL_QUERY",  # Consistent task type
                     project_id=context.deps.vertex_project_id,
                     location=context.deps.vertex_location
                 )
                 if query_embedding_for_chroma is None:
                     return "Error generating query embedding with Vertex AI."
                 
-                # Cache the embedding
+                # Normalize embedding before caching (L2 normalization for consistency)
+                import numpy as np
+                query_vec = np.array(query_embedding_for_chroma)
+                query_embedding_for_chroma = (query_vec / np.linalg.norm(query_vec)).tolist()
+                
+                # Cache the normalized embedding
                 embedding_cache.store(hypothetical_answer, query_embedding_for_chroma)
+                print(f"💾 Normalized embedding cached for HyDE answer")
             
             results = collection.query(
                 query_embeddings=[query_embedding_for_chroma],
@@ -3965,56 +4168,85 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         final_docs = [item['document'] for item in reranked_results]
         final_metadatas = [item['metadata'] for item in reranked_results]
     else:
-        print("INFO: Verwende erweiterte Relevanz-Filterung (ohne Vertex AI Reranker)")
-        # Erweiterte Fallback-Filterung mit mehreren Kriterien
-        filtered_docs = []
-        query_words = set(search_query.lower().split())
+        print("INFO: Verwende domänen-agnostische semantische Ähnlichkeit (ohne Token-Overlap-Heuristiken)")
         
-        # Entferne Stoppwörter für bessere Relevanz
-        stop_words = {'der', 'die', 'das', 'und', 'oder', 'aber', 'ist', 'sind', 'was', 'wie', 'wo', 'wann', 'warum'}
-        query_words = query_words - stop_words
+        try:
+            # Generate query embedding for semantic similarity
+            query_embedding = embedding_cache.get(search_query)
+            
+            if query_embedding is None:
+                query_embedding = get_vertex_text_embedding(
+                    text=search_query,
+                    model_name=context.deps.embedding_model_name,
+                    task_type="RETRIEVAL_QUERY",
+                    project_id=context.deps.vertex_project_id,
+                    location=context.deps.vertex_location
+                )
+                if query_embedding:
+                    # Normalize query embedding
+                    import numpy as np
+                    query_vec = np.array(query_embedding)
+                    query_embedding = (query_vec / np.linalg.norm(query_vec)).tolist()
+                    embedding_cache.store(search_query, query_embedding)
+            
+            if query_embedding is None:
+                print("⚠️ Could not generate query embedding, using high-recall fallback")
+                # High-recall fallback: take more documents, let re-ranking handle quality
+                candidate_count = max(50, n_results * 5)
+                final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
+                final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
+            else:
+                # Calculate semantic similarity for all candidates
+                scored_docs = []
+                
+                for doc_meta in initial_docs_with_meta:
+                    doc_text = doc_meta['document']
+                    
+                    # Generate document embedding if needed
+                    doc_embedding = get_vertex_text_embedding(
+                        text=doc_text,
+                        model_name=context.deps.embedding_model_name,
+                        task_type="RETRIEVAL_DOCUMENT",
+                        project_id=context.deps.vertex_project_id,
+                        location=context.deps.vertex_location
+                    )
+                    
+                    if doc_embedding is not None:
+                        # Normalize document embedding
+                        doc_vec = np.array(doc_embedding)
+                        doc_embedding = (doc_vec / np.linalg.norm(doc_vec)).tolist()
+                        
+                        # Calculate cosine similarity (domain-agnostic)
+                        query_vec = np.array(query_embedding)
+                        doc_vec = np.array(doc_embedding)
+                        similarity_score = float(np.dot(query_vec, doc_vec))
+                    else:
+                        # Fallback score if embedding fails
+                        similarity_score = 0.1
+                    
+                    scored_docs.append((doc_meta, similarity_score))
+                
+                # Sort by semantic similarity (no arbitrary thresholds)
+                scored_docs.sort(key=lambda x: x[1], reverse=True)
+                
+                # Take top candidates for re-ranking (high recall approach)
+                candidate_count = max(50, n_results * 5)
+                top_candidates = scored_docs[:candidate_count]
+                
+                final_docs = [item[0]['document'] for item in top_candidates]
+                final_metadatas = [item[0]['metadata'] for item in top_candidates]
+                
+                print(f"---> Semantic similarity ranking: {len(final_docs)} candidates")
+                if top_candidates:
+                    avg_score = sum(item[1] for item in top_candidates) / len(top_candidates)
+                    print(f"---> Average similarity score: {avg_score:.3f}")
         
-        for doc_meta in initial_docs_with_meta:
-            doc_text = doc_meta['document'].lower()
-            doc_words = set(doc_text.split()) - stop_words
-            
-            # Mehrere Relevanz-Kriterien
-            word_overlap = len(query_words.intersection(doc_words))
-            
-            # Bonus für exakte Phrasen-Matches
-            phrase_bonus = 0
-            for word in query_words:
-                if word in doc_text:
-                    phrase_bonus += 2  # Höherer Bonus für exakte Matches
-            
-            # Bonus für wichtige Keywords (falls in der Frage)
-            keyword_bonus = 0
-            important_words = {'weltraum', 'definition', 'grenze', 'kármán', 'atmosphäre', 'vakuum'}
-            for word in important_words:
-                if word in doc_text and any(w in search_query.lower() for w in [word, 'definiert', 'definition']):
-                    keyword_bonus += 3
-            
-            # Bonus für Dokumentlänge (mehr Inhalt = potentiell mehr Info)
-            length_bonus = min(len(doc_text) / 1000, 1.5)  # Max 1.5 Punkte für Länge
-            
-            # Malus für sehr kurze Dokumente (oft wenig informativ)
-            length_penalty = -2 if len(doc_text) < 100 else 0
-            
-            # Gesamtscore
-            total_score = word_overlap * 2 + phrase_bonus + keyword_bonus + length_bonus + length_penalty
-            
-            if total_score > 0:  # Nur Docs mit positivem Score
-                filtered_docs.append((doc_meta, total_score))
-        
-        # Sortiere nach Score und nimm die besten n_results + 3 (etwas mehr als angefragt)
-        filtered_docs.sort(key=lambda x: x[1], reverse=True)
-        top_filtered = filtered_docs[:min(n_results + 3, len(filtered_docs))]
-        
-        final_docs = [item[0]['document'] for item in top_filtered]
-        final_metadatas = [item[0]['metadata'] for item in top_filtered]
-        
-        print(f"---> Enhanced filtering: {len(final_docs)} most relevant chunks")
-        print(f"---> Top 3 scores: {[f'{item[1]:.1f}' for item in top_filtered[:3]]}")
+        except Exception as e:
+            print(f"❌ Semantic similarity ranking failed: {e}")
+            # Ultimate high-recall fallback
+            candidate_count = max(50, n_results * 5)
+            final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
+            final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
 
     print("--- Context Provided to LLM ---")
     return _format_context_parts(final_docs, final_metadatas)
