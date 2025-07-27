@@ -1019,40 +1019,70 @@ class RAGDeps:
 
 # Define the system prompt as a separate variable
 SYSTEM_PROMPT_TEMPLATE = (
-    "Du bist ein **präziser Faktenanalyst**. Deine Kernkompetenz ist es, aus einem gegebenen Kontext die maximale Menge an **spezifischen, überprüfbaren Details** zu extrahieren und diese in einer klaren, gut strukturierten Form zu präsentieren. Deine Antwort muss **ausschließlich auf dem bereitgestellten Kontext basieren**.\n\n"
+    "Du bist ein Experte für die Erstellung präziser, gut strukturierter und flüssig lesbarer Sachtext-Zusammenfassungen. Deine Aufgabe ist es, die Kerninformationen aus einem Quelltext zu extrahieren und sie in einer logischen, narrativen Form darzustellen, die eine spezifische Frage umfassend beantwortet.\n\n"
 
-    "**Aufgabe:** Beantworte die folgende Anfrage als detaillierte und faktenbasierte Analyse.\n\n"
+    "**Die Goldene Regel: Texttreue durch Synthese, nicht durch bloßes Kopieren.**\n"
+    "Deine gesamte Antwort muss ausschließlich auf den Informationen aus dem `--- KONTEXT ---` basieren. Du fügst keinerlei externes Wissen, persönliche Meinungen oder unbegründete Schlussfolgerungen hinzu. Dein Ziel ist es, die Fakten des Textes nicht nur aufzulisten, sondern sie intelligent zu einer verständlichen und gut lesbaren Erzählung zu verweben.\n\n"
+
+    "**Dein Arbeitsprozess in 4 Schritten:**\n\n"
+
+    "**Schritt 1: Gesamtverständnis und Frage-Fokus**\n"
+    "Lies zuerst den gesamten Text, um das Hauptthema, die zentralen Akteure und die chronologische oder thematische Abfolge zu verstehen.\n"
+    "Analysiere die Anfrage ({question}). Deine gesamte Struktur und Auswahl der Fakten muss darauf ausgerichtet sein, diese Frage bestmöglich zu beantworten.\n\n"
+
+    "**Schritt 2: Entwicklung einer narrativen Gliederung**\n"
+    "Basierend auf der Anfrage, erstelle eine logische Gliederung für deine Antwort. Vermeide es, einfach die Struktur des Quelltextes zu kopieren.\n"
+    "Entwickle konzeptionelle Überschriften (mit `##`), die den Inhalt des folgenden Abschnitts zusammenfassen (z.B. \"Historische Entwicklung und technologische Grundlagen\", \"Wirtschaftliche Implikationen und rechtlicher Rahmen\", \"Zukünftige Perspektiven\"). Dies ist besser als simple Schlagworte.\n"
+    "Ordne die Themen so an, dass sie eine Geschichte erzählen: Beginne oft mit den Ursprüngen oder der Definition, gehe zu den Hauptaspekten über und schließe mit Konsequenzen oder Zukunftsaussichten.\n\n"
+
+    "**Schritt 3: Verfassen im sachlichen Berichtsstil**\n"
+    "Einleitung: Beginne mit einem kurzen, einleitenden Absatz (2-3 Sätze), der das Thema umreißt und den Bogen zur zentralen Frage spannt.\n"
+    "Fließtext statt Stichpunkte: Formuliere ganze Sätze und Absätze. Nutze Stichpunkte nur dann sparsam, wenn eine reine Aufzählung von Namen, Daten oder Eigenschaften sinnvoll ist.\n"
+    "Kombiniere und Verbinde: Fasse verwandte Fakten, auch wenn sie an unterschiedlichen Stellen im Quelltext stehen, in einem flüssigen Satz oder Absatz zusammen. Nutze Übergangswörter (z.B. \"Darauf aufbauend...\", \"Dies führte zu...\", \"Parallel dazu...\"), um einen logischen Fluss zu erzeugen.\n"
+    "    *   **SCHLECHT (isoliert):** Die Firma X wurde 2015 gegründet. Die Firma X hat das Produkt Y entwickelt. Das Produkt Y generierte 10 Mio. € Umsatz.\n"
+    "    *   **GUT (synthetisiert):** Die 2015 gegründete Firma X entwickelte das Produkt Y, das einen Umsatz von 10 Mio. € generierte.\n"
+    "Kein redundanter Abschluss: Beende deine Zusammenfassung mit dem letzten inhaltlichen Punkt. Füge keinen separaten Abschnitt wie \"Kernaussagen\" hinzu. Die Kernaussagen sollten bereits durch deine gute Strukturierung und Formulierung im Text selbst klar geworden sein.\n\n"
+
+"**Schritt 4: Zwingend erforderliche Quellenangaben**\n"
+    "Dies ist die wichtigste Anweisung und muss exakt befolgt werden. Deine gesamte Glaubwürdigkeit hängt davon ab.\n"
+    "Verständnis des Kontext-Formats: Der von dir verarbeitete Kontext ist in SOURCE_BLOCKS unterteilt. Jeder Block enthält vier entscheidende Informationen:\n"
+    "[SOURCE_ID]: Die Nummer der Hauptquelle (z.B. 1).\n"
+    "[SOURCE_URL]: Die Basis-URL der Quelle.\n"
+    "[SOURCE_ANCHOR]: Der spezifische Anker-Link zum Unterkapitel (z.B. #...).\n"
+    "[CONTENT]: Der eigentliche Textinhalt.\n"
+    "Regel 1: Einzelne Zitation:\n"
+    "Jeder Satz, der Fakten aus einem SOURCE_BLOCK enthält, MUSS am Ende mit einer präzisen Zitation im Format (ID)[URL+ANCHOR] belegt werden.\n"
+    "ANWENDUNGSBEISPIEL (Zwingend zu befolgen!):\n"
+    "GEGEBEN: Ein SOURCE_BLOCK mit dem Anker #...\n"
+    "DEINE AUSGABE: \"Im Rahmen des Apollo-Programms betraten 12 Astronauten die Mondoberfläche (1)[https://...#...].\"\n"
+    "Regel 2: Mehrfache Zitation bei Synthese:\n"
+    "Wenn ein Satz Fakten aus mehreren SOURCE_BLOCKS kombiniert, liste die Zitationen am Ende des Satzes auf, getrennt durch ein Leerzeichen. Halte das Format exakt ein.\n"
+    "BEISPIEL FÜR KORREKTE MEHRFACHE ZITATION:\n"
+    "FALSCH: ...(1)[URL1][1][URL2]\n"
+    "KORREKT: \"... (1)[URL#...], ... (2)[URL#...].\"\n\n"
     
+    "**Schritt 5: Finaler Quellenabschnitt und Selbstkontrolle**\n"
+    "Erstellung der Quellenliste:\n"
+    "Erstelle am Ende deiner gesamten Antwort einen Abschnitt ## Quellen. Deine Ausgabe für diesen Abschnitt MUSS exakt diesem Format folgen (inklusive Überschrift und Nummerierung):\n"
+    "```\n"
+    "## Quellen\n"
+    "1) https://beispiel-url-eins.de\n"
+    "2) https://beispiel-url-zwei.com\n"
+    "```\n"
+    "(Du listest hier jede SOURCE_ID einmalig mit der SOURCE_URL ohne Anker auf.)\n"
+
+    "**Finale Selbstkontrolle (Zero-Tolerance-Prüfung):**\n"
+    "Deine Antwort wird nur dann als erfolgreich bewertet, wenn sie ALLE folgenden Prüfungen besteht. Es gibt keine Ausnahmen.\n"
+    "1. **Prüfung der Zitation:** Ist JEDER Absatz meiner Antwort (einschließlich des einleitenden und des abschließenden Absatzes) korrekt mit einer oder mehreren Zitationen im Format `(ID)[URL+ANCHOR]` belegt?\n"
+    "2. **Prüfung der Quellenliste:** Ist der Abschnitt `## Quellen` am Ende vorhanden UND exakt so formatiert wie im Beispiel (mit Nummerierung, z.B. `1) https://...`)?\n"
+    "3. **Prüfung der Korrektheit:** Stimmen die URLs und Anker in meinen Zitationen exakt mit den `SOURCE_BLOCKS` überein?\n\n"
+
+
     "**Anfrage:** {question}\n\n"
     
-    "**Anforderungen an deine Antwort (Qualitätsmerkmale):**\n"
-    "**1. Priorität: Maximale Faktendichte und Granularität:**\n"
-    "    - **Dein primäres Ziel ist es, allgemeine Aussagen zu vermeiden.** Ersetze jede allgemeine Formulierung durch die spezifischsten Informationen, die der Kontext bietet.\n"
-    "    - **Integriere proaktiv und mit hoher Dichte die folgenden Detailtypen:**\n"
-    "        - **Quantitative Daten:** Konkrete Zahlen, Statistiken, Geldbeträge, Höhenangaben, Prozentwerte.\n"
-    "        - **Namen und Eigennamen:** Spezifische Personen, Organisationen, Gesetze, Programme, Technologien.\n"
-    "        - **Chronologische Marker:** Genaue Jahreszahlen oder Daten für Ereignisse und Meilensteine.\n"
-    "        - **Technische/Kausale Details:** Kurze Erklärungen für das 'Warum', 'Was', 'Weshalb', 'Wieso' oder 'Wie', falls im Kontext vorhanden.\n"
-    "    - **Leitprinzip:** Lieber eine spezifische, aber enger gefasste Antwort, die vor Details strotzt, als eine breite, aber oberflächliche Antwort.\n"
-
-    "**2. Umfassende thematische Struktur (als Rahmen für die Fakten):**\n"
-    "    - Ordne die extrahierten Fakten in eine logische und umfassende Struktur ein. Beleuchte dabei, falls im Kontext enthalten, Aspekte wie historische Entwicklung, aktuelle Situation, zukünftige Konzepte und Auswirkungen (positiv/negativ).\n"
-    "    - Diese Struktur dient als Gerüst, das mit den unter Punkt 1 geforderten, dichten Fakten gefüllt wird.\n"
-    
-    "**3. Exzellente Lesbarkeit:**\n"
-    "    - Gliedere deine Antwort mit klaren, aussagekräftigen Überschriften (z.B. `## Hauptthema`, `### Unterpunkt`).\n"
-    "    - Beginne mit einer kurzen Einleitung, die den Rahmen setzt, und schließe mit einem prägnanten Fazit, das die wichtigsten Fakten zusammenfasst.\n"
-    "    - Nutze Aufzählungen (`• Liste Item`) oder nummerierte Listen (`1. Liste Item`) zur übersichtlichen Darstellung von konkreten Fakten.\n"
-    
-    "**4. Strikte Sachlichkeit und Quellenintegration:**\n"
-    "    - Deine Antwort MUSS zu 100% auf den Informationen im `--- KONTEXT ---` basieren. Erfinde oder schlussfolgere keine Informationen, die nicht explizit genannt werden.\n"
-    "    - Belege jede Information direkt im Text mit klickbaren Quellenverweisen, auch von sprungmarken innerhalb einer Website im Format `[Nummer](URL)`. Die Referenznummern (z.B. `[Quelle 1]`) und die zugehörigen URLs findest du im Kontext. Wandle 'Quelle X' in die reine Zahl 'X' um.\n"
-    "    - Führe am Ende unter der Überschrift `## Quellen` nur die tatsächlich zitierten Quellen und ihre URLs auf.\n"
-    "    - Wenn der Kontext keine ausreichenden Informationen zur Beantwortung der Frage zulässt, antworte klar: 'Basierend auf den verfügbaren Informationen kann ich diese Frage nicht vollständig beantworten.' oder 'Der bereitgestellte Kontext enthält keine Informationen zu dieser Frage.'\n\n"
-
-    "--- KONTEXT ---\n"
+    "**--- KONTEXT ---**\n"
     "{context}\n"
-    "--- END KONTEXT ---\n"
+    "**--- END KONTEXT ---**\n"
 )
 
 # Configure primary and fallback models
@@ -1354,7 +1384,7 @@ async def retrieve_documents_structured(
         print(f"---> HyDE {i+1}: '{query[:30]}...' -> '{hyde[:50]}...'")
     
     # --- Parallel Retrieval for all HyDE answers ---
-    initial_n_results = max(50, n_results * 3)
+    initial_n_results = max(30, n_results * 2)  # Reduzierte Kandidaten für bessere Performance
     print(f"🔍 Retrieving {initial_n_results} candidates per query...")
     
     try:
@@ -1589,6 +1619,7 @@ async def retrieve_documents_structured(
         total_words = len(words)
         entropy = 0.0
         
+        import numpy as np
         for count in word_counts.values():
             prob = count / total_words
             if prob > 0:
@@ -1857,43 +1888,52 @@ async def rerank_documents_tool(
             # Simple fallback without token overlap heuristics
             enhanced_documents = retrieval_result.ranked_documents.documents[:top_n]
         else:
-            # Calculate semantic similarity scores
+            # Calculate semantic similarity scores using batch processing
             enhanced_documents = []
             
+            # Separate documents that need embeddings from those that already have them
+            docs_needing_embeddings = []
+            docs_with_embeddings = []
+            
             for ranked_doc in retrieval_result.ranked_documents.documents:
-                # Get or generate document embedding
+                if ranked_doc.document.embedding is None:
+                    docs_needing_embeddings.append(ranked_doc)
+                else:
+                    docs_with_embeddings.append(ranked_doc)
+            
+            print(f"📊 Embedding status: {len(docs_with_embeddings)} cached, {len(docs_needing_embeddings)} need generation")
+            
+            # Batch generate embeddings for documents that need them
+            if docs_needing_embeddings:
+                texts_to_embed = [doc.document.content for doc in docs_needing_embeddings]
+                
+                print(f"🚀 Batch generating {len(texts_to_embed)} document embeddings...")
+                batch_embeddings = await batch_generate_document_embeddings(
+                    texts=texts_to_embed,
+                    deps=ctx.deps,
+                    task_type="RETRIEVAL_DOCUMENT",
+                    max_concurrency=8,  # Reasonable concurrency
+                    timeout_seconds=8.0  # Fast timeout for better UX
+                )
+                
+                # Assign batch-generated embeddings back to documents
+                for ranked_doc, embedding in zip(docs_needing_embeddings, batch_embeddings):
+                    ranked_doc.document.embedding = embedding
+            
+            # Now calculate similarity scores for all documents
+            import numpy as np
+            query_vec = np.array(query_embedding)
+            query_vec = query_vec / np.linalg.norm(query_vec)  # Normalize query vector once
+            
+            for ranked_doc in retrieval_result.ranked_documents.documents:
                 doc_embedding = ranked_doc.document.embedding
                 
-                if doc_embedding is None:
-                    # Generate consistent embedding for document with proper task_type
-                    doc_embedding = get_vertex_text_embedding(
-                        text=ranked_doc.document.content,
-                        model_name=ctx.deps.embedding_model_name,
-                        task_type="RETRIEVAL_DOCUMENT",  # Consistent task type for documents
-                        project_id=ctx.deps.vertex_project_id,
-                        location=ctx.deps.vertex_location
-                    )
-                    
-                    # Normalize document embedding (L2 normalization)
-                    if doc_embedding is not None:
-                        import numpy as np
-                        doc_vec = np.array(doc_embedding)
-                        doc_embedding = (doc_vec / np.linalg.norm(doc_vec)).tolist()
-                
                 if doc_embedding is not None:
-                    # Calculate cosine similarity (domain-agnostic)
-                    import numpy as np
-                    query_vec = np.array(query_embedding)
+                    # Calculate cosine similarity (vectors are already normalized)
                     doc_vec = np.array(doc_embedding)
-                    
-                    # Normalize vectors
-                    query_vec = query_vec / np.linalg.norm(query_vec)
-                    doc_vec = doc_vec / np.linalg.norm(doc_vec)
-                    
-                    # Cosine similarity
                     similarity_score = float(np.dot(query_vec, doc_vec))
                 else:
-                    # Fallback to original score if embedding fails
+                    # Fallback to original score if embedding generation failed
                     similarity_score = ranked_doc.score
                 
                 enhanced_doc = RankedDocument(
@@ -2076,9 +2116,74 @@ async def get_cache_metrics_tool(ctx: RunContext[RAGDeps]) -> CacheMetrics:
     print(f"📊 Cache Performance:")
     print(f"  - Total cache hit rate: {metrics.cache_hit_rate:.1%}")
     print(f"  - LLM cache: {metrics.llm_cache_stats.get('hit_count', 0)} hits, {metrics.llm_cache_stats.get('miss_count', 0)} misses")
-    print(f"  - Embedding cache: {metrics.embedding_cache_stats.get('hit_count', 0)} hits, {metrics.embedding_cache_stats.get('miss_count', 0)} misses")
+    
+    # Enhanced embedding cache reporting
+    embedding_stats = metrics.embedding_cache_stats
+    if isinstance(embedding_stats, dict) and 'total_embedding_hits' in embedding_stats:
+        print(f"  - Embedding caches combined: {embedding_stats['total_embedding_hits']} hits, {embedding_stats['total_embedding_misses']} misses")
+        print(f"    * Query cache: {embedding_stats['query_cache'].get('hit_count', 0)} hits")
+        print(f"    * Document cache: {embedding_stats['document_cache'].get('hit_count', 0)} hits") 
+        print(f"    * Mixed cache: {embedding_stats['mixed_cache'].get('hit_count', 0)} hits")
+    else:
+        # Fallback for legacy format
+        print(f"  - Embedding cache: {embedding_stats.get('hit_count', 0)} hits, {embedding_stats.get('miss_count', 0)} misses")
     
     return metrics
+
+@agent.tool
+async def warm_document_cache_tool(
+    ctx: RunContext[RAGDeps],
+    collection_name: str,
+    max_documents: int = 50
+) -> str:
+    """Warm the document embedding cache for a specific collection."""
+    print(f"--- Document Cache Warming Tool Called ---")
+    print(f"Collection: {collection_name}, Max documents: {max_documents}")
+    
+    try:
+        cached_count = await warm_document_embedding_cache(
+            collection_name=collection_name,
+            deps=ctx.deps,
+            max_documents=max_documents
+        )
+        
+        result = f"✅ Successfully warmed cache with {cached_count} document embeddings for collection '{collection_name}'"
+        print(result)
+        return result
+        
+    except Exception as e:
+        error_msg = f"❌ Cache warming failed: {str(e)}"
+        print(error_msg)
+        return error_msg
+
+@agent.tool
+async def cleanup_embedding_cache_tool(ctx: RunContext[RAGDeps], max_age_hours: int = 168) -> str:
+    """Clean up old entries from embedding caches."""
+    print(f"--- Cache Cleanup Tool Called ---")
+    print(f"Cleaning entries older than {max_age_hours} hours")
+    
+    try:
+        # Cleanup all cache instances
+        document_embedding_cache.cleanup_old_entries(max_age_hours)
+        mixed_embedding_cache.cleanup_old_entries(max_age_hours)
+        embedding_cache.cleanup_old_entries(max_age_hours) if hasattr(embedding_cache, 'cleanup_old_entries') else None
+        
+        # Get updated stats
+        metrics = get_cache_metrics()
+        
+        result = f"✅ Cache cleanup completed. Current cache sizes: "
+        if isinstance(metrics.embedding_cache_stats, dict):
+            result += f"Document: {metrics.embedding_cache_stats['document_cache'].get('cache_size', 0)}, "
+            result += f"Mixed: {metrics.embedding_cache_stats['mixed_cache'].get('cache_size', 0)}, "
+            result += f"Query: {metrics.embedding_cache_stats['query_cache'].get('cache_size', 0)}"
+        
+        print(result)
+        return result
+        
+    except Exception as e:
+        error_msg = f"❌ Cache cleanup failed: {str(e)}"
+        print(error_msg)
+        return error_msg
 
 # ===== OPTIMIZED BATCH PROCESSING =====
 
@@ -2203,6 +2308,187 @@ async def process_batch_with_structured_models(
         total_processing_time=total_processing_time
     )
 
+def precompute_normalized_vectors(embeddings: List[List[float]]):
+    """
+    Precompute normalized vectors for efficient similarity calculations.
+    
+    Args:
+        embeddings: List of embedding vectors
+    
+    Returns:
+        Normalized embedding matrix (n_embeddings x embedding_dim)
+    """
+    import numpy as np
+    
+    if not embeddings:
+        return np.array([])
+    
+    # Convert to numpy array
+    embedding_matrix = np.array(embeddings)
+    
+    # Compute norms for each embedding
+    norms = np.linalg.norm(embedding_matrix, axis=1, keepdims=True)
+    
+    # Avoid division by zero
+    norms = np.where(norms == 0, 1, norms)
+    
+    # Normalize all vectors at once
+    normalized_matrix = embedding_matrix / norms
+    
+    return normalized_matrix
+
+def batch_cosine_similarity(query_embedding: List[float], document_embeddings: List[List[float]]) -> List[float]:
+    """
+    Optimized batch cosine similarity calculation using numpy vectorization.
+    
+    Args:
+        query_embedding: Single query embedding vector
+        document_embeddings: List of document embedding vectors
+    
+    Returns:
+        List of cosine similarity scores
+    """
+    import numpy as np
+    
+    if not document_embeddings:
+        return []
+    
+    # Normalize query vector
+    query_vec = np.array(query_embedding)
+    query_vec = query_vec / np.linalg.norm(query_vec)
+    
+    # Precompute normalized document vectors
+    doc_matrix = precompute_normalized_vectors(document_embeddings)
+    
+    if doc_matrix.size == 0:
+        return [0.0] * len(document_embeddings)
+    
+    # Batch cosine similarity: query_vec @ doc_matrix.T
+    similarities = np.dot(query_vec, doc_matrix.T)
+    
+    return similarities.tolist()
+
+async def batch_generate_document_embeddings(
+    texts: List[str],
+    deps: RAGDeps,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    max_concurrency: int = 10,
+    timeout_seconds: float = 10.0
+) -> List[Optional[List[float]]]:
+    """
+    Optimized batch embedding generation for documents with parallel processing,
+    timeout handling, and retry logic.
+    """
+    import asyncio
+    import time
+    import numpy as np
+    from typing import Optional, List, Tuple
+    
+    print(f"🚀 Batch generating embeddings for {len(texts)} documents...")
+    start_time = time.time()
+    
+    # Semaphore to limit concurrent API calls
+    semaphore = asyncio.Semaphore(max_concurrency)
+    
+    async def generate_single_embedding_with_retry(
+        text: str, 
+        index: int, 
+        max_retries: int = 2
+    ) -> Tuple[int, Optional[List[float]]]:
+        """Generate embedding for single text with timeout and retry logic."""
+        async with semaphore:
+            # Check cache first
+            cache_enabled = (
+                deps.cache_config is None or 
+                deps.cache_config.enable_embedding_cache
+            )
+            
+            if cache_enabled:
+                cached_embedding = embedding_cache.get(text)
+                if cached_embedding:
+                    print(f"🎯 Cache HIT for document {index}")
+                    return index, cached_embedding
+            
+            # Try generating embedding with retries
+            for attempt in range(max_retries + 1):
+                try:
+                    # Generate embedding with timeout
+                    embedding = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            get_vertex_text_embedding,
+                            text=text,
+                            model_name=deps.embedding_model_name,
+                            task_type=task_type,
+                            project_id=deps.vertex_project_id,
+                            location=deps.vertex_location
+                        ),
+                        timeout=timeout_seconds
+                    )
+                    
+                    if embedding is not None:
+                        # Normalize embedding (L2 normalization)
+                        import numpy as np
+                        embedding_vec = np.array(embedding)
+                        normalized_embedding = (embedding_vec / np.linalg.norm(embedding_vec)).tolist()
+                        
+                        # Cache the normalized embedding
+                        if cache_enabled:
+                            embedding_cache.store(text, normalized_embedding)
+                            print(f"💾 Cached embedding for document {index}")
+                        
+                        return index, normalized_embedding
+                    
+                except asyncio.TimeoutError:
+                    print(f"⏰ Timeout for document {index} (attempt {attempt + 1}/{max_retries + 1})")
+                    if attempt == max_retries:
+                        print(f"❌ Final timeout for document {index}")
+                        return index, None
+                    
+                except Exception as e:
+                    print(f"❌ Error generating embedding for document {index} (attempt {attempt + 1}): {e}")
+                    if attempt == max_retries:
+                        return index, None
+                    
+                    # Exponential backoff
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+            
+            return index, None
+    
+    # Process all embeddings in parallel
+    tasks = [
+        generate_single_embedding_with_retry(text, i) 
+        for i, text in enumerate(texts)
+    ]
+    
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    except Exception as e:
+        print(f"❌ Batch embedding generation failed: {e}")
+        return [None] * len(texts)
+    
+    # Sort results by index and extract embeddings
+    embeddings = [None] * len(texts)
+    successful_count = 0
+    
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"❌ Task failed with exception: {result}")
+            continue
+            
+        index, embedding = result
+        embeddings[index] = embedding
+        if embedding is not None:
+            successful_count += 1
+    
+    total_time = time.time() - start_time
+    success_rate = successful_count / len(texts) * 100
+    
+    print(f"✅ Batch embedding completed in {total_time:.2f}s")
+    print(f"   Success rate: {success_rate:.1f}% ({successful_count}/{len(texts)})")
+    print(f"   Average time per embedding: {total_time/len(texts):.3f}s")
+    
+    return embeddings
+
 @agent.tool
 async def process_batch_embeddings_tool(
     ctx: RunContext[RAGDeps],
@@ -2213,63 +2499,14 @@ async def process_batch_embeddings_tool(
     print(f"--- Batch Embeddings Tool Called ---")
     print(f"Processing {len(texts)} texts for embeddings")
     
-    # Create batch items
-    batch_items = [
-        BatchItem(id=f"text_{i}", data=text, metadata={"task_type": task_type})
-        for i, text in enumerate(texts)
-    ]
-    
-    # Define the embedding processor function
-    async def embedding_processor(text: str) -> Optional[List[float]]:
-        """Process a single text to generate embedding."""
-        # Check cache first if enabled
-        cache_enabled = (
-            ctx.deps.cache_config is None or 
-            ctx.deps.cache_config.enable_embedding_cache
-        )
-        
-        if cache_enabled:
-            cached_embedding = embedding_cache.get(text)
-            if cached_embedding:
-                return cached_embedding
-        
-        # Generate new embedding
-        embedding = get_vertex_text_embedding(
-            text=text,
-            model_name=ctx.deps.embedding_model_name,
-            task_type=task_type,
-            project_id=ctx.deps.vertex_project_id,
-            location=ctx.deps.vertex_location
-        )
-        
-        # Cache the result if enabled
-        if embedding and cache_enabled:
-            embedding_cache.store(text, embedding)
-        
-        return embedding
-    
-    # Process batch with optimization
-    batch_result = await process_batch_with_structured_models(
-        items=batch_items,
-        processor_func=embedding_processor,
-        config=ctx.deps.batch_config,
-        semaphore_limit=10  # Limit concurrent embedding requests
+    # Use the new batch function
+    return await batch_generate_document_embeddings(
+        texts=texts,
+        deps=ctx.deps,
+        task_type=task_type,
+        max_concurrency=8,  # Reasonable concurrency for API calls
+        timeout_seconds=8.0  # Shorter timeout for faster fallback
     )
-    
-    # Extract embeddings in original order
-    embeddings = [None] * len(texts)
-    for result in batch_result.results:
-        index = int(result.id.split('_')[1])
-        if result.success:
-            embeddings[index] = result.result
-        else:
-            print(f"❌ Embedding failed for text {index}: {result.error}")
-    
-    print(f"📊 Batch Embedding Metrics:")
-    print(f"  - Success rate: {batch_result.metrics.batch_success_rate:.1%}")
-    print(f"  - Average processing time: {batch_result.metrics.average_processing_time:.2f}s")
-    
-    return embeddings
 
 async def run_agent_with_fallback(prompt: str, deps: RAGDeps, system_prompt_override: str = None) -> str:
     """Enhanced agent execution with structured model fallback logic."""
@@ -4075,7 +4312,7 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         print(f"Error generating hypothetical answer: {e}. Falling back to original query.")
 
     # --- Initial Retrieval Step --- 
-    initial_n_results = max(50, n_results * 3)  # Mehr Kandidaten für besseres Retrieval
+    initial_n_results = max(30, n_results * 2)  # Reduzierte Kandidaten für bessere Performance
     print(f"---> Querying ChromaDB for {initial_n_results} initial candidates...")
 
     # Intelligente Embedding-Auswahl basierend auf Collection-Typ
@@ -4105,7 +4342,7 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
             results = collection.query(
                 query_texts=[hypothetical_answer],
                 n_results=initial_n_results,
-                include=['metadatas', 'documents']
+                include=['metadatas', 'documents', 'distances']  # Include distances for scoring
             )
             print("---> Query executed with ChromaDB default embeddings")
         else:
@@ -4168,85 +4405,181 @@ async def retrieve(context: RunContext[RAGDeps], search_query: str, n_results: i
         final_docs = [item['document'] for item in reranked_results]
         final_metadatas = [item['metadata'] for item in reranked_results]
     else:
-        print("INFO: Verwende domänen-agnostische semantische Ähnlichkeit (ohne Token-Overlap-Heuristiken)")
+        print("INFO: Intelligente Embedding-Strategie basierend auf Collection-Typ")
         
-        try:
-            # Generate query embedding for semantic similarity
-            query_embedding = embedding_cache.get(search_query)
+        # PERFORMANCE OPTIMIZATION: Use ChromaDB scores if collection uses 384D embeddings
+        if collection_embedding_dim == 384:
+            print("🚀 Using ChromaDB distance scores (no additional embedding generation needed)")
             
-            if query_embedding is None:
-                query_embedding = get_vertex_text_embedding(
-                    text=search_query,
-                    model_name=context.deps.embedding_model_name,
-                    task_type="RETRIEVAL_QUERY",
-                    project_id=context.deps.vertex_project_id,
-                    location=context.deps.vertex_location
-                )
-                if query_embedding:
-                    # Normalize query embedding
-                    import numpy as np
-                    query_vec = np.array(query_embedding)
-                    query_embedding = (query_vec / np.linalg.norm(query_vec)).tolist()
-                    embedding_cache.store(search_query, query_embedding)
-            
-            if query_embedding is None:
-                print("⚠️ Could not generate query embedding, using high-recall fallback")
-                # High-recall fallback: take more documents, let re-ranking handle quality
-                candidate_count = max(50, n_results * 5)
-                final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
-                final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
-            else:
-                # Calculate semantic similarity for all candidates
-                scored_docs = []
+            # Use ChromaDB's built-in similarity scores (distances)
+            if results.get('distances') and results['distances'][0]:
+                # Convert ChromaDB distances to similarity scores (lower distance = higher similarity)
+                distances = results['distances'][0]
+                max_distance = max(distances) if distances else 1.0
                 
-                for doc_meta in initial_docs_with_meta:
-                    doc_text = doc_meta['document']
-                    
-                    # Generate document embedding if needed
-                    doc_embedding = get_vertex_text_embedding(
-                        text=doc_text,
-                        model_name=context.deps.embedding_model_name,
-                        task_type="RETRIEVAL_DOCUMENT",
-                        project_id=context.deps.vertex_project_id,
-                        location=context.deps.vertex_location
-                    )
-                    
-                    if doc_embedding is not None:
-                        # Normalize document embedding
-                        doc_vec = np.array(doc_embedding)
-                        doc_embedding = (doc_vec / np.linalg.norm(doc_vec)).tolist()
-                        
-                        # Calculate cosine similarity (domain-agnostic)
-                        query_vec = np.array(query_embedding)
-                        doc_vec = np.array(doc_embedding)
-                        similarity_score = float(np.dot(query_vec, doc_vec))
-                    else:
-                        # Fallback score if embedding fails
-                        similarity_score = 0.1
-                    
+                scored_docs = []
+                for doc_meta, distance in zip(initial_docs_with_meta, distances):
+                    # Convert distance to similarity score (0-1 range)
+                    similarity_score = max(0.0, 1.0 - (distance / max_distance)) if max_distance > 0 else 0.5
                     scored_docs.append((doc_meta, similarity_score))
                 
-                # Sort by semantic similarity (no arbitrary thresholds)
+                # Sort by similarity score
                 scored_docs.sort(key=lambda x: x[1], reverse=True)
                 
-                # Take top candidates for re-ranking (high recall approach)
-                candidate_count = max(50, n_results * 5)
+                # Take top candidates (much fewer needed since ChromaDB already pre-filtered)
+                candidate_count = max(15, n_results)  # Minimal candidates needed
                 top_candidates = scored_docs[:candidate_count]
                 
                 final_docs = [item[0]['document'] for item in top_candidates]
                 final_metadatas = [item[0]['metadata'] for item in top_candidates]
                 
-                print(f"---> Semantic similarity ranking: {len(final_docs)} candidates")
+                print(f"---> ChromaDB similarity ranking: {len(final_docs)} candidates")
                 if top_candidates:
                     avg_score = sum(item[1] for item in top_candidates) / len(top_candidates)
                     print(f"---> Average similarity score: {avg_score:.3f}")
+            else:
+                # Fallback: use first N documents if no distances available
+                candidate_count = max(15, n_results)
+                final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
+                final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
+                print(f"---> Using first {len(final_docs)} candidates (no distance scores available)")
         
-        except Exception as e:
-            print(f"❌ Semantic similarity ranking failed: {e}")
-            # Ultimate high-recall fallback
-            candidate_count = max(50, n_results * 5)
-            final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
-            final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
+        else:
+            # Original Vertex AI embedding strategy for non-384D collections
+            print("INFO: Using Vertex AI embeddings for semantic similarity")
+            
+            try:
+                # Generate query embedding for semantic similarity
+                query_embedding = embedding_cache.get(search_query)
+                
+                if query_embedding is None:
+                    query_embedding = get_vertex_text_embedding(
+                        text=search_query,
+                        model_name=context.deps.embedding_model_name,
+                        task_type="RETRIEVAL_QUERY",
+                        project_id=context.deps.vertex_project_id,
+                        location=context.deps.vertex_location
+                    )
+                    if query_embedding:
+                        # Normalize query embedding
+                        import numpy as np
+                        query_vec = np.array(query_embedding)
+                        query_embedding = (query_vec / np.linalg.norm(query_vec)).tolist()
+                        embedding_cache.store(search_query, query_embedding)
+                
+                if query_embedding is None:
+                    print("⚠️ Could not generate query embedding, using high-recall fallback")
+                    # High-recall fallback: take fewer documents for better performance
+                    candidate_count = max(20, n_results * 2)  # Reduziert für Performance
+                    final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
+                    final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
+                else:
+                    # Calculate semantic similarity for all candidates using batch processing
+                    print(f"🚀 Batch generating embeddings for {len(initial_docs_with_meta)} candidate documents...")
+                    
+                    # Extract document texts for batch processing
+                    doc_texts = [doc_meta['document'] for doc_meta in initial_docs_with_meta]
+                    
+                    # Generate embeddings in batch
+                    batch_embeddings = await batch_generate_document_embeddings(
+                        texts=doc_texts,
+                        deps=context.deps,
+                        task_type="RETRIEVAL_DOCUMENT",
+                        max_concurrency=10,  # Higher concurrency for retrieval phase
+                        timeout_seconds=6.0   # Shorter timeout for faster fallback
+                    )
+                    
+                    # Ultra-optimized batch similarity calculation
+                    print(f"🧮 Computing optimized batch cosine similarity for {len(batch_embeddings)} embeddings...")
+                    
+                    # Separate valid embeddings from failed ones
+                    valid_embeddings = []
+                    valid_indices = []
+                    
+                    for i, doc_embedding in enumerate(batch_embeddings):
+                        if doc_embedding is not None:
+                            valid_embeddings.append(doc_embedding)
+                            valid_indices.append(i)
+                    
+                    # Use optimized batch cosine similarity function
+                    if valid_embeddings:
+                        similarity_scores = batch_cosine_similarity(query_embedding, valid_embeddings)
+                        
+                        # Pair with metadata
+                        scored_docs = []
+                        for idx, similarity_score in zip(valid_indices, similarity_scores):
+                            scored_docs.append((initial_docs_with_meta[idx], similarity_score))
+                        
+                        # Add fallback scores for failed embeddings
+                        failed_count = len(batch_embeddings) - len(valid_embeddings)
+                        for i, doc_embedding in enumerate(batch_embeddings):
+                            if doc_embedding is None:
+                                scored_docs.append((initial_docs_with_meta[i], 0.1))  # Fallback score
+                        
+                        print(f"✅ Vectorized similarity calculation: {len(valid_embeddings)} computed, {failed_count} fallbacks")
+                    else:
+                        # All embeddings failed - use fallback scores
+                        scored_docs = [(doc_meta, 0.1) for doc_meta in initial_docs_with_meta]
+                        print("⚠️ All embeddings failed - using fallback scores")
+                    
+                    # Sort by semantic similarity with early stopping optimization
+                    scored_docs.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Adaptive quality thresholds based on score distribution
+                    if scored_docs:
+                        scores = [score for _, score in scored_docs]
+                        max_score = max(scores)
+                        avg_score = sum(scores) / len(scores)
+                        
+                        # Dynamic threshold: use 85% of max score or 0.7, whichever is lower
+                        high_quality_threshold = min(0.7, max_score * 0.85)
+                        
+                        # But ensure threshold is reasonable (not too low)
+                        high_quality_threshold = max(0.5, high_quality_threshold)
+                        
+                        high_quality_count = sum(1 for _, score in scored_docs if score >= high_quality_threshold)
+                        
+                        print(f"📊 Adaptive threshold: {high_quality_threshold:.3f} (max: {max_score:.3f}, avg: {avg_score:.3f})")
+                    else:
+                        high_quality_threshold = 0.7
+                        high_quality_count = 0
+                    
+                    # Adaptive candidate selection based on quality
+                    if high_quality_count >= n_results:
+                        print(f"🎯 Early stopping: Found {high_quality_count} high-quality candidates (≥{high_quality_threshold})")
+                        # Take only high-quality candidates, up to needed amount
+                        candidate_count = min(high_quality_count, max(15, n_results * 2))
+                        top_candidates = [(doc_meta, score) for doc_meta, score in scored_docs 
+                                        if score >= high_quality_threshold][:candidate_count]
+                    else:
+                        # Standard selection with performance optimization
+                        candidate_count = max(15, n_results * 2)  # Reduced from 20 for better performance
+                        top_candidates = scored_docs[:candidate_count]
+                        if high_quality_count > 0:
+                            print(f"📊 Mixed quality results: {high_quality_count} high-quality, {candidate_count - high_quality_count} standard")
+                    
+                    final_docs = [item[0]['document'] for item in top_candidates]
+                    final_metadatas = [item[0]['metadata'] for item in top_candidates]
+                    
+                    print(f"---> Optimized similarity ranking: {len(final_docs)} candidates selected")
+                    if top_candidates:
+                        avg_score = sum(item[1] for item in top_candidates) / len(top_candidates)
+                        max_score = max(item[1] for item in top_candidates)
+                        min_score = min(item[1] for item in top_candidates)
+                        print(f"---> Similarity scores - Avg: {avg_score:.3f}, Max: {max_score:.3f}, Min: {min_score:.3f}")
+                        
+                        # Performance insight: show quality distribution
+                        excellent_count = sum(1 for _, score in top_candidates if score >= 0.8)
+                        good_count = sum(1 for _, score in top_candidates if 0.6 <= score < 0.8)
+                        fair_count = len(top_candidates) - excellent_count - good_count
+                        print(f"---> Quality distribution: {excellent_count} excellent (≥0.8), {good_count} good (0.6-0.8), {fair_count} fair (<0.6)")
+            
+            except Exception as e:
+                print(f"❌ Semantic similarity ranking failed: {e}")
+                # Ultimate fallback with reduced candidates for performance
+                candidate_count = max(20, n_results * 2)  # Performance-optimiert
+                final_docs = [item['document'] for item in initial_docs_with_meta[:candidate_count]]
+                final_metadatas = [item['metadata'] for item in initial_docs_with_meta[:candidate_count]]
 
     print("--- Context Provided to LLM ---")
     return _format_context_parts(final_docs, final_metadatas)
