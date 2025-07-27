@@ -713,22 +713,22 @@ async def run_ingestion_with_modal(
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
             # CLOUD-OPTIMIERTE Batch-Größen für Streamlit Cloud Stabilität
             if chunk_count > 10000:
-                batch_size = 35  # Ausbalanciert für Stabilität
+                batch_size = 25  # Stark reduziert für Stabilität
                 print(f"ℹ️ Verwende sehr konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 5000:
-                batch_size = 60  # Ausbalanciert für große Datasets
+                batch_size = 40  # Reduziert für große Datasets
                 print(f"ℹ️ Verwende konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 2000:
-                batch_size = 75  # Ausbalanciert für mittlere Datasets
+                batch_size = 50  # Reduziert für mittlere Datasets
                 print(f"ℹ️ Verwende moderate Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 1000:
-                batch_size = 90  # Ausbalanciert für kleinere Datasets
+                batch_size = 60  # Reduziert für kleinere Datasets
                 print(f"ℹ️ Verwende optimierte Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 500:
-                batch_size = 110  # Ausbalanciert für kleine Datasets
+                batch_size = 75  # Reduziert für kleine Datasets
                 print(f"ℹ️ Verwende große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             else:
-                batch_size = 150  # Ausbalanciertes Maximum
+                batch_size = 100  # Reduziertes Maximum
                 print(f"ℹ️ Verwende maximale Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             
             # CLOUD-OPTIMIERTE Chunk-Größen-Anpassung für Streamlit Cloud
@@ -775,7 +775,7 @@ async def run_ingestion_with_modal(
                         embeddings=all_embeddings,  # None = ChromaDB Standard-Embeddings
                         metadatas=all_metadatas,
                         initial_batch_size=current_batch_size,
-                        max_parallel_batches=3  # BALANCED: Process 3 batches in parallel
+                        max_parallel_batches=2  # REDUCED: Process 2 batches in parallel for stability
                     )
                     
                     # Verify collection integrity
