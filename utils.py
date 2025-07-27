@@ -173,20 +173,24 @@ async def add_documents_to_collection_async(
                 if batch_num_result <= 3 or batch_num_result % 50 == 0:
                     print(f"✅ Batch {batch_num_result} completed ({batch_size_actual} docs)")
         
-        # TURBO-MODE: Aggressive batch size adjustment
+        # Health-Check-freundliche Pause alle 5 Batch-Gruppen
+        if batch_num % 5 == 0:
+            time.sleep(0.1)  # Kurze Pause für Streamlit Health-Checks
+        
+        # CLOUD-OPTIMIZED: Conservative batch size adjustment für Streamlit Cloud
         if batch_errors:
             if current_batch_size > 50:  # ERHÖHT: Minimum 50 statt 25
                 current_batch_size = max(50, current_batch_size // 2)
                 print(f"⚠️ Errors detected, reducing batch size to {current_batch_size}")
             else:
                 print(f"❌ Errors persist with minimum batch size: {batch_errors[:2]}")
-        elif turbo_mode and batch_time < 0.8 and current_batch_size < initial_batch_size * 2:
-            # TURBO: Aggressivere Erhöhung bei schneller Verarbeitung
-            current_batch_size = min(initial_batch_size * 2, current_batch_size * 2)
-            print(f"🚀 TURBO: Fast processing detected, doubling batch size to {current_batch_size}")
+        elif turbo_mode and batch_time < 0.8 and current_batch_size < initial_batch_size * 1.5:
+            # CLOUD-OPTIMIZED: Moderatere Erhöhung für Health-Check-Kompatibilität
+            current_batch_size = min(initial_batch_size * 1.5, int(current_batch_size * 1.3))
+            print(f"⚡ CLOUD-OPTIMIZED: Fast processing detected, increasing batch size to {current_batch_size}")
         elif batch_time < 1.5 and current_batch_size < initial_batch_size:
             # Standard: Moderate Erhöhung
-            current_batch_size = min(initial_batch_size, int(current_batch_size * 1.5))
+            current_batch_size = min(initial_batch_size, int(current_batch_size * 1.2))
             print(f"⚡ Fast processing detected, increasing batch size to {current_batch_size}")
         
         # Update batch_start for next iteration
@@ -240,6 +244,10 @@ def add_documents_to_collection_sync(
             print(f"📥 Adding batch {batch_num}: documents {batch_start} to {batch_end-1} ({batch_size_actual} docs)")
         elif batch_num % 100 == 0:
             print(f"📊 Progress: Batch {batch_num} - {successfully_added + batch_size_actual}/{total_docs} documents processed")
+        
+        # Health-Check-freundliche Pause alle 10 Batches
+        if batch_num % 10 == 0:
+            time.sleep(0.05)  # Sehr kurze Pause für Streamlit Health-Checks
 
         try:
             batch_docs = documents[batch_start:batch_end]

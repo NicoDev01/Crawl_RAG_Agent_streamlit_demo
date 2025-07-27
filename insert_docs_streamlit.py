@@ -711,35 +711,37 @@ async def run_ingestion_with_modal(
         
         # Dokumente in Batches hinzufügen für bessere Memory-Performance
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
-            # ULTRA-OPTIMIERTE Batch-Größen für maximale Performance
+            # CLOUD-OPTIMIERTE Batch-Größen für Streamlit Cloud Stabilität
             if chunk_count > 10000:
-                batch_size = 100  # Konservativ für sehr große Datasets
-                print(f"ℹ️ Verwende konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+                batch_size = 50  # Sehr konservativ für sehr große Datasets
+                print(f"ℹ️ Verwende sehr konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 5000:
-                batch_size = 200  # Größere Batches für große Datasets
-                print(f"ℹ️ Verwende große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+                batch_size = 75  # Konservativ für große Datasets
+                print(f"ℹ️ Verwende konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 2000:
-                batch_size = 300  # ERHÖHT: Noch größere Batches (war 100!)
-                print(f"ℹ️ Verwende ultra-große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+                batch_size = 100  # Moderate Batches für mittlere Datasets
+                print(f"ℹ️ Verwende moderate Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 1000:
-                batch_size = 400  # ERHÖHT: Sehr große Batches für mittlere Datasets
-                print(f"ℹ️ Verwende sehr große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+                batch_size = 125  # Etwas größere Batches für kleinere Datasets
+                print(f"ℹ️ Verwende optimierte Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 500:
-                batch_size = 500  # ERHÖHT: Maximum für kleinere Datasets
+                batch_size = 150  # Größere Batches für kleine Datasets
+                print(f"ℹ️ Verwende große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             else:
-                batch_size = 600  # ERHÖHT: Maximum für kleine Datasets
+                batch_size = 200  # Maximum für sehr kleine Datasets
+                print(f"ℹ️ Verwende maximale Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             
-            # ULTRA-AGGRESSIVE Chunk-Größen-Anpassung
+            # CLOUD-OPTIMIERTE Chunk-Größen-Anpassung für Streamlit Cloud
             avg_chunk_size = sum(len(safe_get_text_content(chunk)) for chunk in all_chunks) / len(all_chunks)
-            if avg_chunk_size > 4000:  # Nur bei extrem großen Chunks reduzieren
-                batch_size = max(50, batch_size // 2)  # ERHÖHT: Minimum 50 statt 25
+            if avg_chunk_size > 4000:  # Bei extrem großen Chunks stark reduzieren
+                batch_size = max(25, batch_size // 2)  # Minimum 25 für Stabilität
                 print(f"ℹ️ Reduzierte Batch-Größe auf {batch_size} wegen extrem großer Chunks (avg: {avg_chunk_size:.0f} chars)")
-            elif avg_chunk_size < 800:  # ERHÖHT: Bei kleineren Chunks aggressiver skalieren
-                batch_size = min(800, batch_size * 2)  # ERHÖHT: Maximum 800 statt 300
-                print(f"ℹ️ Verdoppelte Batch-Größe auf {batch_size} wegen kleiner Chunks (avg: {avg_chunk_size:.0f} chars)")
-            elif avg_chunk_size < 1200:  # NEU: Mittlere Chunks auch optimieren
-                batch_size = min(600, int(batch_size * 1.5))
-                print(f"ℹ️ Erhöhte Batch-Größe auf {batch_size} wegen mittlerer Chunks (avg: {avg_chunk_size:.0f} chars)")
+            elif avg_chunk_size < 800:  # Bei kleineren Chunks moderat erhöhen
+                batch_size = min(300, int(batch_size * 1.5))  # Maximum 300 für Cloud-Stabilität
+                print(f"ℹ️ Erhöhte Batch-Größe auf {batch_size} wegen kleiner Chunks (avg: {avg_chunk_size:.0f} chars)")
+            elif avg_chunk_size < 1200:  # Mittlere Chunks leicht optimieren
+                batch_size = min(200, int(batch_size * 1.2))  # Moderate Erhöhung
+                print(f"ℹ️ Leicht erhöhte Batch-Größe auf {batch_size} wegen mittlerer Chunks (avg: {avg_chunk_size:.0f} chars)")
             
             print(f"📦 Final batch configuration: {batch_size} documents per batch for {chunk_count} total chunks")
             
@@ -810,6 +812,7 @@ async def run_ingestion_with_modal(
                             print(f"⚠️ Could not clear collection: {clear_e}")
                     else:
                         final_count = collection.count()
+                        expected_count = len(all_chunks)  # Define expected_count here
                         st.error(f"❌ Alle Versuche fehlgeschlagen: {final_count}/{expected_count} Dokumente gespeichert")
                         print("💡 Versuche es mit einer kleineren Website oder kontaktiere den Support")
                         break
@@ -839,7 +842,7 @@ async def run_ingestion_with_modal(
     except Exception as e:
         error_msg = f"Ingestion failed: {str(e)}"
         print(error_msg)
-        if progress:
+        if progress and hasattr(progress, 'status_text'):
             progress.status_text.text(f"❌ {error_msg}")
         raise e
 
