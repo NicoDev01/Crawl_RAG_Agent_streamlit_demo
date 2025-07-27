@@ -16,7 +16,7 @@ import streamlit as st
 from crawler_client import CrawlerClient
 
 # Import der bestehenden Utility-Funktionen
-from utils import get_chroma_client, get_or_create_collection, add_documents_to_collection
+from utils import get_chroma_client, get_or_create_collection, add_documents_to_collection, add_documents_to_collection_async
 from vertex_ai_utils import get_vertex_text_embeddings_batched, init_vertex_ai
 
 def smart_chunk_markdown(markdown: str, max_len: int = 1500, overlap_len: int = 150) -> List[str]:
@@ -169,15 +169,30 @@ def get_embedding_model_info(model_name: str) -> Dict[str, Any]:
         "max_tokens": 2048
     })
 
-def extract_section_info(chunk: str) -> Dict[str, Any]:
-    """Extracts headers and stats from a chunk."""
-    headers = re.findall(r'^(#+)\s+(.+)$', chunk, re.MULTILINE)
+def safe_get_text_content(chunk) -> str:
+    """Safely extract text content from chunk, whether it's a string or Document object."""
+    if isinstance(chunk, str):
+        return chunk
+    elif hasattr(chunk, 'page_content'):
+        return chunk.page_content
+    elif hasattr(chunk, 'content'):
+        return chunk.content
+    else:
+        # Try to convert to string as fallback
+        return str(chunk)
+
+def extract_section_info(chunk) -> Dict[str, Any]:
+    """Extracts headers and stats from a chunk (handles both strings and Document objects)."""
+    # Safely get text content
+    text_content = safe_get_text_content(chunk)
+    
+    headers = re.findall(r'^(#+)\s+(.+)$', text_content, re.MULTILINE)
     header_str = '; '.join([f'{h[0]} {h[1]}' for h in headers]) if headers else ''
 
     return {
         "headers": header_str,
-        "char_count": len(chunk),
-        "word_count": len(chunk.split())
+        "char_count": len(text_content),
+        "word_count": len(text_content.split())
     }
 
 def sanitize_collection_name(name: str) -> str:
@@ -231,23 +246,56 @@ def generate_collection_name_from_url(url: str) -> str:
     return sanitize_collection_name(name)
 
 class IngestionProgress:
-    """Helper class to track and display ingestion progress."""
+    """Base class to track and display ingestion progress."""
     
     def __init__(self):
-        self.progress_bar = st.progress(0)
-        self.status_text = st.empty()
         self.current_step = 0
         self.total_steps = 5
     
     def update(self, step: int, message: str):
         """Update progress bar and status message."""
         self.current_step = step
+        # Default implementation - can be overridden
+        print(f"Schritt {step}/{self.total_steps}: {message}")
+    
+    def complete(self, message: str = "Ingestion abgeschlossen!"):
+        """Mark ingestion as complete."""
+        print(message)
+    
+    def log_crawl_progress(self, url: str, status: str, time_taken: float = None):
+        """Log crawling progress - can be overridden for live display"""
+        if time_taken:
+            print(f"[{status}] {url} (⏱{time_taken:.1f}s)")
+        else:
+            print(f"[{status}] {url}")
+    
+    def log_batch_progress(self, batch_num: int, total_batches: int, docs_count: int):
+        """Log batch processing progress - can be overridden for live display"""
+        print(f"Batch {batch_num}/{total_batches}: {docs_count} Dokumente verarbeitet")
+    
+    def finish(self):
+        """Called when all processing is complete"""
+        print("🎉 Alle Schritte erfolgreich abgeschlossen!")
+
+# Legacy Progress class for backward compatibility
+class LegacyIngestionProgress(IngestionProgress):
+    """Legacy progress class with progress bars."""
+    
+    def __init__(self):
+        super().__init__()
+        self.progress_bar = st.progress(0)
+        self.status_text = st.empty()
+    
+    def update(self, step: int, message: str):
+        """Update progress bar and status message."""
+        super().update(step, message)
         progress = int((step / self.total_steps) * 100)
         self.progress_bar.progress(progress)
         self.status_text.text(f"Schritt {step}/{self.total_steps}: {message}")
     
     def complete(self, message: str = "Ingestion abgeschlossen!"):
         """Mark ingestion as complete."""
+        super().complete(message)
         self.progress_bar.progress(100)
         self.status_text.text(message)
 
@@ -297,19 +345,29 @@ async def run_ingestion_with_modal(
         
         # Schritt 2: Crawling durchführen
         if progress:
-            progress.update(2, "Crawle Webseiten...")
+            progress.update(2, "Starte Modal.com Crawling...")
         
         # URL-Typ erkennen und entsprechende Crawling-Methode wählen
         if is_txt(url):
             print(f"Detected text file: {url}")
+            if progress:
+                progress.show_sub_process("Lade einzelne Textdatei...")
             crawl_result = await crawler_client.crawl_single(url)
             crawl_results = [crawl_result] if crawl_result.get("success") else []
+            
         elif is_sitemap(url):
             print(f"Detected sitemap: {url}")
+            if progress:
+                progress.show_sub_process("Analysiere Sitemap...")
             crawl_result = await crawler_client.crawl_sitemap(url, max_concurrent=max_concurrent)
             crawl_results = crawl_result.get("results", []) if crawl_result else []
+            if progress and crawl_results:
+                progress.show_sub_process(f"Crawle {len(crawl_results)} URLs aus Sitemap...")
+                
         else:
             print(f"Detected regular URL: {url}")
+            if progress:
+                progress.show_sub_process(f"Crawle Website rekursiv (Tiefe: {max_depth})...")
             crawl_result = await crawler_client.crawl_recursive(
                 start_url=url,
                 max_depth=max_depth,
@@ -317,6 +375,8 @@ async def run_ingestion_with_modal(
                 limit=limit
             )
             crawl_results = crawl_result.get("results", []) if crawl_result else []
+            if progress and crawl_results:
+                progress.show_sub_process(f"Verarbeite {len(crawl_results)} gefundene Seiten...")
         
         # Filter erfolgreiche Crawling-Ergebnisse
         successful_results = [r for r in crawl_results if r.get("success", False) and r.get("markdown")]
@@ -356,10 +416,26 @@ async def run_ingestion_with_modal(
             raise ValueError("Keine Text-Chunks konnten erstellt werden")
         
         print(f"Created {len(all_chunks)} chunks from {len(successful_results)} documents")
+        print(f"📊 Chunk data types: {type(all_chunks[0]) if all_chunks else 'No chunks'}")
+        if all_chunks:
+            # Use safe function to get text content
+            sample_text = safe_get_text_content(all_chunks[0])
+            print(f"📝 Sample chunk length: {len(sample_text)} chars")
+            print(f"📝 Sample chunk preview: {sample_text[:100]}...")
+            
+            # Additional debugging: check if any chunks are not strings
+            non_string_chunks = [i for i, chunk in enumerate(all_chunks) if not isinstance(chunk, str)]
+            if non_string_chunks:
+                print(f"⚠️ WARNING: Found {len(non_string_chunks)} non-string chunks at indices: {non_string_chunks[:5]}")
+                for idx in non_string_chunks[:3]:
+                    print(f"   Chunk {idx} type: {type(all_chunks[idx])}")
+            else:
+                print(f"✅ All chunks are strings")
         
         # Schritt 4: Embeddings generieren (falls Vertex AI verfügbar)
         if progress:
-            progress.update(4, f"Generiere Embeddings für {len(all_chunks)} Chunks...")
+            progress.update(4, f"Prüfe Embedding-Konfiguration...")
+            progress.show_sub_process(f"Analysiere {len(all_chunks)} Chunks für Embeddings...")
         
         all_embeddings = None
         
@@ -386,7 +462,7 @@ async def run_ingestion_with_modal(
                         # Setze die Umgebungsvariable
                         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_filename
                         print("✅ Google Cloud Credentials successfully loaded from secrets")
-                        st.info("✅ Google Cloud Credentials geladen")
+                        print("✅ Google Cloud Credentials geladen")
                     else:
                         raise ValueError("GOOGLE_APPLICATION_CREDENTIALS_JSON not found in secrets")
                 
@@ -400,13 +476,25 @@ async def run_ingestion_with_modal(
                 
                 print(f"Initializing Vertex AI for embeddings with model: {embedding_model}")
                 print(f"Expected embedding dimensions: {expected_dimensions}")
-                st.info(f"🔧 Verwende Vertex AI Modell: {embedding_model} ({model_info['description']})")
+                print(f"🔧 Verwende Vertex AI Modell: {embedding_model} ({model_info['description']})")
                 
                 init_vertex_ai(project_id=vertex_project_id, location=vertex_location)
                 
                 print(f"Generating embeddings for {len(all_chunks)} chunks...")
+                # DEBUG: Check data types before Vertex AI call
+                print(f"🔍 DEBUG: all_chunks type: {type(all_chunks)}")
+                if all_chunks:
+                    print(f"🔍 DEBUG: First chunk type: {type(all_chunks[0])}")
+                    print(f"🔍 DEBUG: First chunk preview: {str(all_chunks[0])[:100]}...")
+                
+                # Extract text content safely (handles both strings and Document objects)
+                chunk_texts = [safe_get_text_content(chunk) for chunk in all_chunks]
+                
+                if progress:
+                    progress.show_sub_process(f"Generiere Vertex AI Embeddings für {len(chunk_texts)} Chunks...")
+                
                 all_embeddings_vertex = await get_vertex_text_embeddings_batched(
-                    texts=all_chunks,
+                    texts=chunk_texts,
                     model_name=embedding_model,
                     task_type="RETRIEVAL_DOCUMENT",
                     project_id=vertex_project_id,
@@ -444,14 +532,14 @@ async def run_ingestion_with_modal(
                 # Validiere, dass die Dimensionen korrekt sind
                 if embedding_dim != expected_dimensions:
                     print(f"WARNING: Expected {expected_dimensions} dimensions but got {embedding_dim}")
-                    st.warning(f"⚠️ Unerwartete Embedding-Dimensionen: Erwartet {expected_dimensions}, erhalten {embedding_dim}")
+                    print(f"⚠️ Unerwartete Embedding-Dimensionen: Erwartet {expected_dimensions}, erhalten {embedding_dim}")
                 
-                st.success(f"✅ Vertex AI Embeddings generiert: {len(all_embeddings)} Embeddings mit {embedding_dim} Dimensionen")
+                print(f"✅ Vertex AI Embeddings generiert: {len(all_embeddings)} Embeddings mit {embedding_dim} Dimensionen")
                 
             except Exception as e:
                 print(f"Vertex AI embedding generation failed: {e}")
-                st.error(f"❌ Vertex AI Embeddings fehlgeschlagen: {str(e)}")
-                st.info("🔄 Verwende ChromaDB Standard-Embeddings (384 Dimensionen)")
+                # Entfernt: st.error() da Vertex AI bewusst nicht verwendet wird
+                print("🔄 Verwende ChromaDB Standard-Embeddings (384 Dimensionen)")
                 all_embeddings = None  # ChromaDB wird Standard-Embeddings verwenden
                 
                 # Wichtig: Bei Vertex AI Fehlern müssen wir sicherstellen, dass bestehende Collections
@@ -461,13 +549,16 @@ async def run_ingestion_with_modal(
                     if collection_name in existing_collections:
                         print(f"Deleting existing collection '{collection_name}' due to embedding type change")
                         chroma_client.delete_collection(name=collection_name)
-                        st.warning(f"⚠️ Bestehende Collection '{collection_name}' gelöscht (Embedding-Typ geändert)")
+                        print(f"⚠️ Bestehende Collection '{collection_name}' gelöscht (Embedding-Typ geändert)")
                 except Exception as delete_error:
                     print(f"Could not delete existing collection: {delete_error}")
                     
         else:
             print("No valid Vertex AI configuration found, using ChromaDB default embeddings")
-            st.info("ℹ️ Verwende ChromaDB Standard-Embeddings (384 Dimensionen) - keine Google Cloud Konfiguration")
+            print("ℹ️ Verwende ChromaDB Standard-Embeddings (384 Dimensionen) - keine Google Cloud Konfiguration")
+            
+            if progress:
+                progress.show_sub_process("Verwende ChromaDB Standard-Embeddings (384 Dimensionen)...")
             
             # Auch hier: Bestehende Vertex AI Collections löschen
             try:
@@ -479,19 +570,20 @@ async def run_ingestion_with_modal(
                     if compatibility.get("expected_dimension") and compatibility["expected_dimension"] > 384:
                         print(f"Deleting existing Vertex AI collection '{collection_name}'")
                         chroma_client.delete_collection(name=collection_name)
-                        st.warning(f"⚠️ Bestehende Vertex AI Collection '{collection_name}' gelöscht")
+                        print(f"⚠️ Bestehende Vertex AI Collection '{collection_name}' gelöscht")
             except Exception as delete_error:
                 print(f"Could not check/delete existing collection: {delete_error}")
         
         # Schritt 5: Memory-Check und ChromaDB-Speicherung
         if progress:
-            progress.update(5, f"Speichere {len(all_chunks)} Chunks in ChromaDB...")
+            progress.update(5, f"Bereite ChromaDB-Speicherung vor...")
+            progress.show_sub_process(f"Analysiere {len(all_chunks)} Chunks für Memory-Optimierung...")
         
         # Intelligentes Memory-Management für Streamlit Cloud
         chunk_count = len(all_chunks)
         
         # Realistischere Memory-Schätzung basierend auf tatsächlicher Chunk-Größe
-        avg_chunk_size = sum(len(chunk) for chunk in all_chunks) / len(all_chunks) if all_chunks else 0
+        avg_chunk_size = sum(len(safe_get_text_content(chunk)) for chunk in all_chunks) / len(all_chunks) if all_chunks else 0
         estimated_memory_mb = (chunk_count * avg_chunk_size * 2) / (1024 * 1024)  # Text + Embeddings + Overhead
         
         print(f"Memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks (avg size: {avg_chunk_size:.0f} chars)")
@@ -502,28 +594,31 @@ async def run_ingestion_with_modal(
         
         # Benutzer-definiertes Chunk-Limit
         if max_chunks and chunk_count > max_chunks:
-            st.info(f"🔢 Reduziere auf benutzer-definiertes Limit: {max_chunks} Chunks")
+            print(f"🔢 Reduziere auf benutzer-definiertes Limit: {max_chunks} Chunks")
             target_chunks = max_chunks
             reduction_applied = True
         # Automatische Memory-basierte Reduktion
         elif auto_reduce and (chunk_count > 5000 or estimated_memory_mb > 800):
             if estimated_memory_mb > 800:
                 target_chunks = int(800 * chunk_count / estimated_memory_mb)
-                st.warning(f"🔄 Auto-Reduktion: {target_chunks} Chunks um Memory-Limit einzuhalten")
+                print(f"🔄 Auto-Reduktion: {target_chunks} Chunks um Memory-Limit einzuhalten")
                 reduction_applied = True
             elif chunk_count > 5000:
                 target_chunks = 5000
-                st.warning(f"🔄 Auto-Reduktion: {target_chunks} Chunks für bessere Performance")
+                print(f"🔄 Auto-Reduktion: {target_chunks} Chunks für bessere Performance")
                 reduction_applied = True
         
         if reduction_applied:
             # Intelligentes Sampling: Behalte die besten Chunks
             chunk_scores = []
             for i, chunk in enumerate(all_chunks):
+                # Safely get text content
+                text_content = safe_get_text_content(chunk)
+                
                 # Score basierend auf Länge, Struktur und Informationsgehalt
-                score = len(chunk) * (1 + chunk.count('.') * 0.1 + chunk.count('#') * 0.2)
+                score = len(text_content) * (1 + text_content.count('.') * 0.1 + text_content.count('#') * 0.2)
                 # Bevorzuge Chunks mit Headers und strukturiertem Content
-                if any(header in chunk for header in ['##', '###', '**']):
+                if any(header in text_content for header in ['##', '###', '**']):
                     score *= 1.2
                 chunk_scores.append((score, i))
             
@@ -542,15 +637,15 @@ async def run_ingestion_with_modal(
             chunk_count = len(all_chunks)
             estimated_memory_mb = (chunk_count * avg_chunk_size * 2) / (1024 * 1024)
             
-            st.success(f"✅ Dataset reduziert: {original_chunk_count} → {chunk_count} Chunks (~{estimated_memory_mb:.0f}MB)")
+            print(f"✅ Dataset reduziert: {original_chunk_count} → {chunk_count} Chunks (~{estimated_memory_mb:.0f}MB)")
         
         # Finale Memory-Prüfung mit höherem Limit
         if estimated_memory_mb > 1200:  # Erhöhtes Limit, da Schätzung konservativer ist
             st.error(f"❌ Memory-Limit überschritten: {estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
-            st.info("💡 Versuche: Kleinere Chunk-Größe, weniger URLs, oder verwende 'Einzelne URL' statt 'Sitemap'")
+            print("💡 Versuche: Kleinere Chunk-Größe, weniger URLs, oder verwende 'Einzelne URL' statt 'Sitemap'")
             raise ValueError(f"Memory limit exceeded: {estimated_memory_mb:.0f}MB estimated for {chunk_count} chunks")
         elif estimated_memory_mb > 800:
-            st.warning(f"⚠️ Hoher Speicherverbrauch: ~{estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
+            print(f"⚠️ Hoher Speicherverbrauch: ~{estimated_memory_mb:.0f}MB für {chunk_count} Chunks")
         
         print(f"Final memory estimate: {estimated_memory_mb:.1f}MB for {chunk_count} chunks")
         
@@ -586,7 +681,7 @@ async def run_ingestion_with_modal(
             
             if not compatibility["compatible"]:
                 print(f"Embedding dimension incompatibility detected: {compatibility['reason']}")
-                st.warning(f"⚠️ Embedding-Dimensionen-Konflikt: {compatibility['reason']}")
+                print(f"⚠️ Embedding-Dimensionen-Konflikt: {compatibility['reason']}")
                 raise ValueError(f"Dimension conflict: {compatibility['reason']}")
             else:
                 print(f"Collection compatibility check passed: {compatibility['reason']}")
@@ -594,7 +689,7 @@ async def run_ingestion_with_modal(
         except Exception as e:
             if "dimension" in str(e).lower() or "Dimension conflict" in str(e):
                 print(f"Embedding dimension conflict detected: {e}")
-                st.warning(f"⚠️ Embedding-Dimensionen-Konflikt erkannt. Erstelle Collection neu...")
+                print(f"⚠️ Embedding-Dimensionen-Konflikt erkannt. Erstelle Collection neu...")
                 
                 # Collection löschen und neu erstellen
                 try:
@@ -610,43 +705,127 @@ async def run_ingestion_with_modal(
                     embedding_function=embedding_function
                 )
                 print(f"Created new collection '{collection_name}' with correct embedding dimensions")
-                st.success(f"✅ Collection '{collection_name}' wurde mit korrekten Dimensionen neu erstellt")
+                print(f"✅ Collection '{collection_name}' wurde mit korrekten Dimensionen neu erstellt")
             else:
                 raise e
         
         # Dokumente in Batches hinzufügen für bessere Memory-Performance
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
-            # Dynamische Batch-Größe basierend auf Chunk-Anzahl
-            if chunk_count > 1000:
-                batch_size = 50  # Kleinere Batches für große Datasets
-                st.info(f"ℹ️ Verwende kleinere Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+            # ULTRA-OPTIMIERTE Batch-Größen für maximale Performance
+            if chunk_count > 10000:
+                batch_size = 100  # Konservativ für sehr große Datasets
+                print(f"ℹ️ Verwende konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+            elif chunk_count > 5000:
+                batch_size = 200  # Größere Batches für große Datasets
+                print(f"ℹ️ Verwende große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+            elif chunk_count > 2000:
+                batch_size = 300  # ERHÖHT: Noch größere Batches (war 100!)
+                print(f"ℹ️ Verwende ultra-große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
+            elif chunk_count > 1000:
+                batch_size = 400  # ERHÖHT: Sehr große Batches für mittlere Datasets
+                print(f"ℹ️ Verwende sehr große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 500:
-                batch_size = 75
+                batch_size = 500  # ERHÖHT: Maximum für kleinere Datasets
             else:
-                batch_size = 100
+                batch_size = 600  # ERHÖHT: Maximum für kleine Datasets
+            
+            # ULTRA-AGGRESSIVE Chunk-Größen-Anpassung
+            avg_chunk_size = sum(len(safe_get_text_content(chunk)) for chunk in all_chunks) / len(all_chunks)
+            if avg_chunk_size > 4000:  # Nur bei extrem großen Chunks reduzieren
+                batch_size = max(50, batch_size // 2)  # ERHÖHT: Minimum 50 statt 25
+                print(f"ℹ️ Reduzierte Batch-Größe auf {batch_size} wegen extrem großer Chunks (avg: {avg_chunk_size:.0f} chars)")
+            elif avg_chunk_size < 800:  # ERHÖHT: Bei kleineren Chunks aggressiver skalieren
+                batch_size = min(800, batch_size * 2)  # ERHÖHT: Maximum 800 statt 300
+                print(f"ℹ️ Verdoppelte Batch-Größe auf {batch_size} wegen kleiner Chunks (avg: {avg_chunk_size:.0f} chars)")
+            elif avg_chunk_size < 1200:  # NEU: Mittlere Chunks auch optimieren
+                batch_size = min(600, int(batch_size * 1.5))
+                print(f"ℹ️ Erhöhte Batch-Größe auf {batch_size} wegen mittlerer Chunks (avg: {avg_chunk_size:.0f} chars)")
+            
+            print(f"📦 Final batch configuration: {batch_size} documents per batch for {chunk_count} total chunks")
             
             print(f"Adding {chunk_count} documents in batches of {batch_size}")
             
-            add_documents_to_collection(
-                collection=collection,
-                ids=all_ids,
-                documents=all_chunks,
-                embeddings=all_embeddings,  # None = ChromaDB Standard-Embeddings
-                metadatas=all_metadatas,
-                batch_size=batch_size
-            )
+            # Add documents with robust error handling and retry logic
+            max_retries = 2
+            retry_count = 0
+            current_batch_size = batch_size
             
-            # Memory-Status nach dem Hinzufügen
+            while retry_count <= max_retries:
+                try:
+                    print(f"🔄 Attempt {retry_count + 1}/{max_retries + 1} with batch size {current_batch_size}")
+                    
+                    # Extract text content safely for ChromaDB insertion
+                    document_texts = [safe_get_text_content(chunk) for chunk in all_chunks]
+                    
+                    # Batch-Insertion mit Live-Updates
+                    expected_batches = (len(document_texts) + current_batch_size - 1) // current_batch_size
+                    print(f"Adding {len(document_texts)} documents in {expected_batches} batches (size: {current_batch_size})")
+                    
+                    if progress:
+                        progress.show_sub_process(f"Speichere in {expected_batches} Batches (Größe: {current_batch_size})...")
+                    
+                    # Führe die eigentliche Batch-Insertion aus
+                    await add_documents_to_collection_async(
+                        collection=collection,
+                        ids=all_ids,
+                        documents=document_texts,  # Use safely extracted text content
+                        embeddings=all_embeddings,  # None = ChromaDB Standard-Embeddings
+                        metadatas=all_metadatas,
+                        initial_batch_size=current_batch_size,
+                        max_parallel_batches=8  # INCREASED: Process 8 batches in parallel
+                    )
+                    
+                    # Verify collection integrity
+                    from utils import verify_collection_integrity
+                    expected_count = len(all_chunks)
+                    integrity_ok = verify_collection_integrity(collection, expected_count)
+                    
+                    final_count = collection.count()
+                    
+                    if integrity_ok and final_count >= expected_count * 0.95:  # Allow 5% tolerance
+                        print(f"ChromaDB storage completed: {final_count} documents")
+                        break
+                    else:
+                        raise Exception(f"Integrity check failed: {final_count}/{expected_count} documents")
+                        
+                except Exception as e:
+                    retry_count += 1
+                    print(f"❌ Attempt {retry_count} failed: {str(e)}")
+                    
+                    if retry_count <= max_retries:
+                        # Reduce batch size for retry
+                        current_batch_size = max(5, current_batch_size // 2)
+                        print(f"⚠️ Retry {retry_count} mit reduzierter Batch-Größe: {current_batch_size}")
+                        
+                        # Clear collection for clean retry
+                        try:
+                            chroma_client.delete_collection(name=collection_name)
+                            collection = get_or_create_collection(
+                                client=chroma_client,
+                                collection_name=collection_name,
+                                embedding_function=embedding_function
+                            )
+                            print(f"🔄 Collection cleared for retry {retry_count}")
+                        except Exception as clear_e:
+                            print(f"⚠️ Could not clear collection: {clear_e}")
+                    else:
+                        final_count = collection.count()
+                        st.error(f"❌ Alle Versuche fehlgeschlagen: {final_count}/{expected_count} Dokumente gespeichert")
+                        print("💡 Versuche es mit einer kleineren Website oder kontaktiere den Support")
+                        break
+            
             final_count = collection.count()
-            print(f"Collection now contains {final_count} documents")
+            print(f"📊 Final collection contains {final_count} documents")
+            
             if final_count > 5000:
-                st.warning(f"⚠️ Collection enthält {final_count} Dokumente. Performance könnte beeinträchtigt sein.")
+                print(f"⚠️ Collection enthält {final_count} Dokumente. Performance könnte beeinträchtigt sein.")
                 
         else:
             raise ValueError("Keine Chunks zum Speichern verfügbar")
         
         if progress:
             progress.complete(f"Erfolgreich {len(all_chunks)} Chunks gespeichert!")
+            progress.finish()
         
         return {
             "success": True,
@@ -724,7 +903,7 @@ async def query_collection_with_embeddings(
                     
             except Exception as e:
                 print(f"Vertex AI query embedding failed: {e}")
-                st.warning(f"⚠️ Vertex AI Query-Embedding fehlgeschlagen, verwende ChromaDB Default")
+                print(f"⚠️ Vertex AI Query-Embedding fehlgeschlagen, verwende ChromaDB Default")
         
         # Query ausführen
         if query_embeddings:

@@ -446,22 +446,66 @@ def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_s
     # Progress Container - isoliert von der Form
     with st.container():
         st.markdown("---")
-        st.info("🔄 Erstelle deine Wissensdatenbank...")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        
+        st.markdown("---")
         
         try:
             # Import der Ingestion-Pipeline
             from insert_docs_streamlit import run_ingestion_sync, IngestionProgress
             
-            # Custom Progress Tracker
-            class UserProgress(IngestionProgress):
-                def update(self, step: int, message: str):
-                    progress = int((step / 5) * 100)
-                    progress_bar.progress(progress)
-                    status_text.text(f"Schritt {step}/5: {message}")
+            # Echter Spinner mit dynamischen Updates
+            spinner_container = st.empty()
             
-            progress = UserProgress()
+            class SpinnerProgress(IngestionProgress):
+                def __init__(self, container):
+                    self.container = container
+                    self.current_spinner = None
+                    self.current_status = ""
+                
+                def update(self, step: int, message: str):
+                    """Startet neuen Spinner mit aktueller Nachricht"""
+                    self.current_status = message
+                    
+                    # Beende vorherigen Spinner
+                    if self.current_spinner:
+                        self.current_spinner.__exit__(None, None, None)
+                    
+                    # Starte neuen Spinner
+                    with self.container:
+                        self.current_spinner = st.spinner(message, show_time=True)
+                        self.current_spinner.__enter__()
+                
+                def show_sub_process(self, sub_message: str):
+                    """Aktualisiert Spinner mit Sub-Prozess"""
+                    self.current_status = sub_message
+                    
+                    # Beende vorherigen Spinner
+                    if self.current_spinner:
+                        self.current_spinner.__exit__(None, None, None)
+                    
+                    # Starte neuen Spinner mit Sub-Prozess
+                    with self.container:
+                        self.current_spinner = st.spinner(sub_message, show_time=True)
+                        self.current_spinner.__enter__()
+                
+                def complete(self, message: str):
+                    """Beendet Spinner und zeigt Erfolg"""
+                    if self.current_spinner:
+                        self.current_spinner.__exit__(None, None, None)
+                        self.current_spinner = None
+                    
+                    with self.container:
+                        st.success(f"✅ {message}")
+                        import time
+                        time.sleep(0.5)  # Kurz anzeigen
+                
+                def finish(self):
+                    """Beendet alle Spinner"""
+                    if self.current_spinner:
+                        self.current_spinner.__exit__(None, None, None)
+                    self.container.empty()
+            
+            progress = SpinnerProgress(spinner_container)
             
             # Konfiguration basierend auf intelligenter Erkennung
             if detected_method and detected_method.method == "sitemap":
@@ -474,7 +518,7 @@ def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_s
                 depth = max_depth
                 limit = max_pages
             
-            # Ingestion ausführen
+            # Ingestion ausführen mit dynamischer Anzeige
             result = run_ingestion_sync(
                 url=url,
                 collection_name=name,
@@ -489,10 +533,6 @@ def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_s
                 auto_reduce=auto_reduce,
                 max_chunks=None
             )
-            
-            # Erfolg anzeigen
-            progress_bar.progress(100)
-            status_text.empty()
             
             st.success("🎉 Wissensdatenbank erfolgreich erstellt!")
             
@@ -511,8 +551,6 @@ def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_s
                 del st.session_state.processing
             
         except Exception as e:
-            progress_bar.empty()
-            status_text.empty()
             st.error(f"❌ Fehler beim Erstellen der Wissensdatenbank: {str(e)}")
             
             if "Memory limit exceeded" in str(e):
@@ -553,15 +591,18 @@ def chat_interface(chroma_client):
         collection = chroma_client.get_collection(selected_collection)
         chunk_count = collection.count()
         
-        # Berechne Dokumente
+        # Berechne Dokumente (FIXED: Alle Chunks berücksichtigen)
         try:
-            sample_metadata = collection.get(limit=min(chunk_count, 1000), include=["metadatas"])
+            # Für große Collections: Alle Metadaten abrufen (nur URLs)
+            all_metadata = collection.get(limit=chunk_count, include=["metadatas"])
             unique_urls = set()
-            for metadata in sample_metadata["metadatas"]:
+            for metadata in all_metadata["metadatas"]:
                 if metadata and "url" in metadata:
                     unique_urls.add(metadata["url"])
             doc_count = len(unique_urls)
-        except:
+            print(f"📊 Collection '{selected_collection}': {chunk_count} chunks from {doc_count} unique documents")
+        except Exception as e:
+            print(f"⚠️ Error calculating document count: {e}")
             doc_count = "Unbekannt"
         
         # Info-Karten

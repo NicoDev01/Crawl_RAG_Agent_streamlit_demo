@@ -289,15 +289,18 @@ def chat_interface(chroma_client):
         collection = chroma_client.get_collection(selected_collection)
         chunk_count = collection.count()
         
-        # Berechne Dokumente
+        # Berechne Dokumente (FIXED: Alle Chunks berücksichtigen)
         try:
-            sample_metadata = collection.get(limit=min(chunk_count, 1000), include=["metadatas"])
+            # Für große Collections: Alle Metadaten abrufen
+            all_metadata = collection.get(limit=chunk_count, include=["metadatas"])
             unique_urls = set()
-            for metadata in sample_metadata["metadatas"]:
+            for metadata in all_metadata["metadatas"]:
                 if metadata and "url" in metadata:
                     unique_urls.add(metadata["url"])
             doc_count = len(unique_urls)
-        except:
+            print(f"📊 Collection '{selected_collection}': {chunk_count} chunks from {doc_count} unique documents")
+        except Exception as e:
+            print(f"⚠️ Error calculating document count: {e}")
             doc_count = "Unbekannt"
         
         # Info-Karten
