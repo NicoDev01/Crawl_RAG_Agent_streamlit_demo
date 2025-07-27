@@ -15,7 +15,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse, urldefrag
 from xml.etree import ElementTree
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, MemoryAdaptiveDispatcher
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from utils import get_chroma_client, get_or_create_collection, add_documents_to_collection
@@ -361,9 +361,9 @@ async def run_ingestion(
     chunk_size: int,
     chunk_overlap: int,
     max_depth: int,
-    max_concurrent: int,
-    batch_size: int,
-    limit: Optional[int]
+    max_concurrent: int = 4,
+    batch_size: int = 100,
+    limit: Optional[int] = None
 ):
     """
     Refactored core logic of the ingestion process.
@@ -543,8 +543,8 @@ def main():
     parser.add_argument("--chunk-size", type=int, default=3000, help="Target chunk size in characters for smart_chunk_markdown.")
     parser.add_argument("--chunk-overlap", type=int, default=200, help="Overlap size in characters for smart_chunk_markdown.")
     parser.add_argument("--max-depth", type=int, default=3, help="Max recursion depth for crawling (if not a sitemap or single file).")
-    parser.add_argument("--max-concurrent", type=int, default=5, help="Max parallel browser sessions")
-    parser.add_argument("--batch-size", type=int, default=300, help="ChromaDB insert batch size")
+    parser.add_argument("--max-concurrent", type=int, default=4, help="Max parallel browser sessions")
+    parser.add_argument("--batch-size", type=int, default=100, help="ChromaDB insert batch size")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of pages crawled (only for regular website crawl)")
     args = parser.parse_args()
 

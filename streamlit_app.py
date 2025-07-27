@@ -12,7 +12,7 @@ import asyncio
 import base64
 import tempfile
 import time
-from typing import Optional
+
 from datetime import datetime
 
 # ChromaDB und andere Imports
@@ -21,8 +21,7 @@ from crawler_client import CrawlerClient
 
 # UX Components Import
 from ux_components import URLValidator
-from state_manager import get_state_manager
-from url_detection import detect_url_type, URLDetector
+from url_detection import detect_url_type
 
 # Windows Event Loop Policy
 if sys.platform == 'win32':
@@ -115,7 +114,8 @@ def setup_google_cloud_credentials():
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_filename
             return True
         return False
-    except Exception:
+    except Exception as e:
+        st.error(f"Ein Fehler ist beim Setup von Google Cloud Credentials aufgetreten: {e}")
         return False
 
 @st.cache_resource
@@ -126,18 +126,20 @@ def get_chroma_client():
         
         # Model durch Dummy-Operation vorladen um 79MB Download zu vermeiden
         print("🔄 Lade ChromaDB Embedding-Model vor...")
-        temp_collection = client.create_collection("model_preload_temp")
+        temp_collection_name = f"model_preload_{int(time.time())}"
+        temp_collection = client.create_collection(temp_collection_name)
         temp_collection.add(documents=["dummy text for model loading"], ids=["preload_1"])
-        client.delete_collection("model_preload_temp")
-        print("✅ ChromaDB Embedding-Model erfolgreich vorgeladen")
+        client.delete_collection(temp_collection_name)
+        print("✅ Embedding-Model vorgeladen.")
         
         return client
     except Exception as e:
-        print(f"⚠️ ChromaDB Model-Preloading fehlgeschlagen: {e}")
-        # Fallback: Standard Client ohne Preloading
+        st.error(f"Ein Fehler ist beim Initialisieren von ChromaDB aufgetreten: {e}")
         try:
+            print("⚠️ WARNUNG: Fallback zu ChromaDB Client ohne Pre-Loading.")
             return chromadb.Client()
-        except Exception:
+        except Exception as fallback_e:
+            st.error(f"Ein unerwarteter Fehler ist aufgetreten: {fallback_e}")
             return None
 
 @st.cache_resource
@@ -151,7 +153,8 @@ def get_crawler_client():
             return None
             
         return CrawlerClient(base_url=base_url, api_key=api_key)
-    except Exception:
+    except Exception as e:
+        st.error(f"Ein Fehler ist beim Initialisieren des Crawler Clients aufgetreten: {e}")
         return None
 
 def main():
@@ -289,14 +292,10 @@ def create_knowledge_base(crawler_client, chroma_client):
                 # URL-Validierung
                 url_validation = getattr(st.session_state, 'url_validation_result', None)
                 if url_validation:
-                    status_indicator = url_validator.get_validation_status_indicator(url_validation)
-                    
                     if url_validation.is_valid:
                         # Intelligente Typ-Erkennung (nur für interne Logik)
                         detected_method = detect_url_type(url)
                         st.session_state.detected_crawling_method = detected_method
-                    else:
-                        st.session_state.detected_crawling_method = None
             else:
                 st.session_state.detected_crawling_method = None
 
@@ -395,7 +394,7 @@ def create_knowledge_base(crawler_client, chroma_client):
                 
                 max_concurrent = st.slider(
                     "Parallele Prozesse:",
-                    min_value=1, max_value=10, value=5,
+                    min_value=1, max_value=10, value=2,
                     help="Mehr Prozesse = schneller, aber höhere Serverlast"
                 )
         
@@ -579,7 +578,8 @@ def chat_interface(chroma_client):
     # Verfügbare Collections laden
     try:
         collections = [c.name for c in chroma_client.list_collections()]
-    except:
+    except ValueError as e:
+        st.error(f"Fehler beim Laden der Collections: {e}")
         collections = []
     
     if not collections:
@@ -752,7 +752,8 @@ def render_improved_chat_interface(chroma_client, selected_collection):
                             timestamp = datetime.fromisoformat(message["timestamp"])
                             st.markdown(f'<div class="message-timestamp">{timestamp.strftime("%H:%M")}</div>', 
                                       unsafe_allow_html=True)
-                        except:
+                        except (ValueError, TypeError):
+                            # Ignore errors if timestamp is malformed
                             pass
         else:
             # Welcome Message

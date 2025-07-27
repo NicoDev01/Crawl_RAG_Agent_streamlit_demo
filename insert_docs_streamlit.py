@@ -713,27 +713,28 @@ async def run_ingestion_with_modal(
         if all_chunks:  # Nur hinzufügen wenn Chunks vorhanden sind
             # CLOUD-OPTIMIERTE Batch-Größen für Streamlit Cloud Stabilität
             if chunk_count > 10000:
-                batch_size = 50  # Sehr konservativ für sehr große Datasets
+                batch_size = 25  # Stark reduziert für Stabilität
                 print(f"ℹ️ Verwende sehr konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 5000:
-                batch_size = 75  # Konservativ für große Datasets
+                batch_size = 40  # Reduziert für große Datasets
                 print(f"ℹ️ Verwende konservative Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 2000:
-                batch_size = 100  # Moderate Batches für mittlere Datasets
+                batch_size = 50  # Reduziert für mittlere Datasets
                 print(f"ℹ️ Verwende moderate Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 1000:
-                batch_size = 125  # Etwas größere Batches für kleinere Datasets
+                batch_size = 60  # Reduziert für kleinere Datasets
                 print(f"ℹ️ Verwende optimierte Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             elif chunk_count > 500:
-                batch_size = 150  # Größere Batches für kleine Datasets
+                batch_size = 75  # Reduziert für kleine Datasets
                 print(f"ℹ️ Verwende große Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             else:
-                batch_size = 200  # Maximum für sehr kleine Datasets
+                batch_size = 100  # Reduziertes Maximum
                 print(f"ℹ️ Verwende maximale Batch-Größe ({batch_size}) für {chunk_count} Chunks")
             
             # CLOUD-OPTIMIERTE Chunk-Größen-Anpassung für Streamlit Cloud
             avg_chunk_size = sum(len(safe_get_text_content(chunk)) for chunk in all_chunks) / len(all_chunks)
             if avg_chunk_size > 4000:  # Bei extrem großen Chunks stark reduzieren
+                batch_size = max(5, batch_size // 2)
                 batch_size = max(25, batch_size // 2)  # Minimum 25 für Stabilität
                 print(f"ℹ️ Reduzierte Batch-Größe auf {batch_size} wegen extrem großer Chunks (avg: {avg_chunk_size:.0f} chars)")
             elif avg_chunk_size < 800:  # Bei kleineren Chunks moderat erhöhen
@@ -774,7 +775,7 @@ async def run_ingestion_with_modal(
                         embeddings=all_embeddings,  # None = ChromaDB Standard-Embeddings
                         metadatas=all_metadatas,
                         initial_batch_size=current_batch_size,
-                        max_parallel_batches=8  # INCREASED: Process 8 batches in parallel
+                        max_parallel_batches=2  # REDUCED: Process 4 batches in parallel for stability
                     )
                     
                     # Verify collection integrity

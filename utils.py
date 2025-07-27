@@ -1,20 +1,24 @@
 """Utility functions for text processing and ChromaDB operations."""
 
 import os
+import asyncio
+import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional
 
 import chromadb
+from chromadb.api import ClientAPI
 
 
-
-def get_chroma_client(persist_directory: str) -> chromadb.PersistentClient:
+def get_chroma_client(persist_directory: str) -> ClientAPI:
     """Get a ChromaDB client with the specified persistence directory."""
     os.makedirs(persist_directory, exist_ok=True)
     return chromadb.PersistentClient(path=persist_directory)
 
 
 def get_or_create_collection(
-    client,  # Kann PersistentClient oder Client sein
+    client: ClientAPI,  
     collection_name: str,
     embedding_model_name: str = "all-MiniLM-L6-v2",
     distance_function: str = "cosine",
@@ -35,15 +39,15 @@ def get_or_create_collection(
     """
     try:
         collection = client.get_collection(name=collection_name)
-        print(f"Successfully loaded existing collection: '{collection_name}'.")
+        print("Successfully loaded existing collection:", collection_name)
         return collection
     except Exception:
-        print(f"Collection '{collection_name}' not found. Creating a new one.")
+        print("Collection", collection_name, "does not exist. Creating a new one.")
         
         # Prepare collection creation parameters
         create_params = {
             "name": collection_name,
-            "metadata": {"hnsw:space": distance_function}
+            "metadata": {"embedding_model": embedding_model_name, "distance_function": distance_function}
         }
         
         # Only add embedding_function if it's not None
@@ -53,14 +57,13 @@ def get_or_create_collection(
         else:
             print("Creating collection without embedding function (will use provided embeddings)")
         
-        collection = client.create_collection(**create_params)
+        # Make 'name' explicit to satisfy linter
+        collection = client.create_collection(
+            name=create_params.pop("name"),
+            **create_params
+        )
         print(f"Successfully created new collection: '{collection_name}'.")
         return collection
-
-
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import time
 
 async def add_documents_to_collection_async(
     collection: chromadb.Collection,
@@ -68,10 +71,10 @@ async def add_documents_to_collection_async(
     documents: List[str],
     metadatas: List[Dict[str, Any]],
     embeddings: Optional[List[List[float]]] = None,
-    initial_batch_size: int = 100,
-    max_parallel_batches: int = 2,  # CLOUD-OPTIMIERT: Reduziert für Streamlit Cloud Stabilität
-    turbo_mode: bool = True  # NEU: Turbo-Mode für maximale Performance
-):
+    initial_batch_size: int = 50,
+    max_parallel_batches: int = 1,  
+    turbo_mode: bool = True
+) -> None:
     """Add documents to ChromaDB collection with async parallel processing and adaptive batch sizing."""
     if not documents:
         print("No documents to add.")
@@ -179,7 +182,7 @@ async def add_documents_to_collection_async(
         
         # CLOUD-OPTIMIZED: Conservative batch size adjustment für Streamlit Cloud
         if batch_errors:
-            if current_batch_size > 50:  # ERHÖHT: Minimum 50 statt 25
+            if current_batch_size > 50:  
                 current_batch_size = max(50, current_batch_size // 2)
                 print(f"⚠️ Errors detected, reducing batch size to {current_batch_size}")
             else:
@@ -320,7 +323,7 @@ def add_documents_to_collection_sync(
 
     # Final verification
     final_count = collection.count()
-    print(f"🎯 === BATCH INSERTION SUMMARY ===")
+    print("🎯 === BATCH INSERTION SUMMARY ===")
     print(f"📊 Total documents processed: {total_docs}")
     print(f"✅ Successfully added: {successfully_added}")
     print(f"❌ Failed batches: {len(failed_batches)}")
@@ -328,7 +331,7 @@ def add_documents_to_collection_sync(
     print(f"🎯 Success rate: {(successfully_added/total_docs*100):.1f}%")
     
     if failed_batches:
-        print(f"⚠️ Failed batch details:")
+        print("⚠️ Failed batch details:")
         for failed in failed_batches:
             print(f"  • Batch {failed['batch_num']} ({failed['start']}-{failed['end']}): {failed['error']}")
     
@@ -342,12 +345,12 @@ def verify_collection_integrity(collection: chromadb.Collection, expected_count:
     """Verify that the collection contains the expected number of documents."""
     try:
         actual_count = collection.count()
-        print(f"🔍 Collection integrity check:")
+        print("🔍 Collection integrity check:")
         print(f"  • Expected documents: {expected_count}")
         print(f"  • Actual documents: {actual_count}")
         
         if actual_count == expected_count:
-            print(f"✅ Collection integrity verified!")
+            print("✅ Collection integrity verified!")
             return True
         else:
             print(f"⚠️ Collection integrity issue: {actual_count}/{expected_count} documents")
@@ -360,7 +363,7 @@ def verify_collection_integrity(collection: chromadb.Collection, expected_count:
                     for i, doc in enumerate(sample["documents"][:3]):
                         print(f"  • Doc {i+1}: {doc[:100]}...")
                 else:
-                    print(f"❌ No documents found in collection!")
+                    print("❌ No documents found in collection!")
             except Exception as e:
                 print(f"❌ Error sampling collection: {e}")
             
@@ -383,8 +386,6 @@ def query_collection(
         query_embeddings=query_embeddings
     )
     return results
-
-import shutil
 
 def check_embedding_compatibility(collection: chromadb.Collection, test_embedding: Optional[List[float]] = None) -> Dict[str, Any]:
     """Check if a collection is compatible with given embedding dimensions.
@@ -448,7 +449,7 @@ def check_embedding_compatibility(collection: chromadb.Collection, test_embeddin
             "expected_dimension": None
         }
 
-def delete_collection(client: chromadb.PersistentClient, collection_name: str, db_dir: str):
+def delete_collection(client: ClientAPI, collection_name: str, db_dir: str) -> None:
     """Deletes a collection from ChromaDB and its corresponding data directory."""
     try:
         # Get collection to find its UUID, which corresponds to the folder name
@@ -473,7 +474,7 @@ def delete_collection(client: chromadb.PersistentClient, collection_name: str, d
         print(f"Error deleting collection '{collection_name}': {e}")
         raise e
 
-def rename_collection(client: chromadb.PersistentClient, old_name: str, new_name: str):
+def rename_collection(client: ClientAPI, old_name: str, new_name: str) -> None:
     """Renames a collection by copying data to a new one and deleting the old one."""
     try:
         # Validate that the new name doesn't already exist
