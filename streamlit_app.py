@@ -120,12 +120,25 @@ def setup_google_cloud_credentials():
 
 @st.cache_resource
 def get_chroma_client():
-    """Erstelle einen In-Memory ChromaDB Client."""
+    """Erstelle einen In-Memory ChromaDB Client mit vorgeladenem Model."""
     try:
         client = chromadb.Client()
+        
+        # Model durch Dummy-Operation vorladen um 79MB Download zu vermeiden
+        print("🔄 Lade ChromaDB Embedding-Model vor...")
+        temp_collection = client.create_collection("model_preload_temp")
+        temp_collection.add(documents=["dummy text for model loading"], ids=["preload_1"])
+        client.delete_collection("model_preload_temp")
+        print("✅ ChromaDB Embedding-Model erfolgreich vorgeladen")
+        
         return client
-    except Exception:
-        return None
+    except Exception as e:
+        print(f"⚠️ ChromaDB Model-Preloading fehlgeschlagen: {e}")
+        # Fallback: Standard Client ohne Preloading
+        try:
+            return chromadb.Client()
+        except Exception:
+            return None
 
 @st.cache_resource
 def get_crawler_client():

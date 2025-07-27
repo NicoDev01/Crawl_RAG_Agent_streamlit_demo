@@ -69,7 +69,7 @@ async def add_documents_to_collection_async(
     metadatas: List[Dict[str, Any]],
     embeddings: Optional[List[List[float]]] = None,
     initial_batch_size: int = 100,
-    max_parallel_batches: int = 8,  # ERHÖHT: Default auf 8 statt 3
+    max_parallel_batches: int = 2,  # CLOUD-OPTIMIERT: Reduziert für Streamlit Cloud Stabilität
     turbo_mode: bool = True  # NEU: Turbo-Mode für maximale Performance
 ):
     """Add documents to ChromaDB collection with async parallel processing and adaptive batch sizing."""
