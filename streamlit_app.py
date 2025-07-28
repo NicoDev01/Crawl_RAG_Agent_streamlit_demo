@@ -219,35 +219,35 @@ def create_knowledge_base(crawler_client, chroma_client):
         return
     
     # Hilfe-Sektion
-    with st.expander("💡 Hilfe: Unterstützte URL-Typen und Einstellungen"):
+    with st.expander("💡 Hilfe: Unterstützte Formate und Einstellungen"):
         st.markdown("""
-        **🎯 Automatisch erkannte URL-Typen:**
+        **1. 📋 Unterstützte Formate:**
         
-        • **🌐 Website-URLs** → Rekursives Crawling  
+        • **🌐 Website-URLs** → Automatisches Crawling aller Unterseiten  
           `https://docs.example.com`, `https://example.com/help`
           
-        • **🗺️ Sitemap-URLs** → Automatisches Parsing  
+        • **🗺️ Sitemap-URLs** → Direktes Parsing der XML-Sitemap  
           `https://example.com/sitemap.xml`, `https://site.com/sitemap_index.xml`
           
-        • **📄 Einzelseiten** → Direkte Extraktion  
-          `https://example.com/page.html`, `https://site.com/document.pdf`
+        • **📄 Einzelseiten** → Extraktion einer spezifischen Seite  
+          `https://example.com/page.html`, `https://blog.example.com/artikel`
           
-        • **📚 Dokumentations-Sites** → Tiefgehende Analyse  
+        • **📚 Dokumentations-Sites** → Speziell für Docs optimiert  
           `https://docs.example.com`, `https://help.example.com`
         
-        **⚙️ Intelligente Einstellungen:**
+        **2. ⚙️ Einstellungsmöglichkeiten:**
         
-        - **Crawling-Tiefe**: Automatisch optimiert je nach Website-Typ
-        - **Seitenlimits**: Empfohlene Werte basierend auf URL-Analyse  
-        - **Chunk-Größe**: Textaufteilung für optimale Suche (800-1200 = präzise, 1500-2000 = mehr Kontext)
-        - **Parallelisierung**: Automatisch angepasst an Website-Typ
+        - **Crawling-Tiefe**: Bestimmt, wie viele Link-Ebenen verfolgt werden (1-4)
+        - **Seitenzahl**: Maximale Anzahl der zu verarbeitenden Seiten (1-100)
+        - **Automatische Optimierung**: Passt Einstellungen für beste Performance an
+        - **Demo-Limits**: Bis 20 Seiten ~5min, darüber deutlich länger
         
-        **💡 Das System erkennt automatisch den besten Crawling-Typ und stellt optimale Einstellungen bereit!**
+        **💡 Tipp: Starte mit niedrigen Werten und erhöhe sie bei Bedarf!**
         """)
     
     with st.form("knowledge_creation"):
         # Basis-Konfiguration
-        st.subheader("🌐 Website-Konfiguration")
+        st.subheader("🌐 Website eingeben")
         
         col1, col2 = st.columns([3, 2])
         
@@ -300,118 +300,35 @@ def create_knowledge_base(crawler_client, chroma_client):
                 st.session_state.detected_crawling_method = None
 
         
-        # Intelligente Crawling-Einstellungen
+        # Crawling-Einstellungen - immer angezeigt
         st.subheader("⚙️ Crawling-Einstellungen")
         
-        # Hole erkannte Methode
-        detected_method = getattr(st.session_state, 'detected_crawling_method', None)
+        col3, col4 = st.columns(2)
         
-        if detected_method:
-            # Zeige optimale Einstellungen basierend auf erkanntem Typ
-            col3, col4 = st.columns(2)
-            
-            with col3:
-                if detected_method.method in ["website", "documentation"]:
-                    # Rekursive Crawling-Einstellungen (Default auf 1)
-                    max_depth = st.slider(
-                        "Crawling-Tiefe:",
-                        min_value=1, max_value=4, value=1,  # Immer Default 1
-                        help="Wie tief sollen Links verfolgt werden?"
-                    )
-                    
-                    # Dynamische Erklärung basierend auf Typ
-                    if detected_method.method == "documentation":
-                        st.caption("📚 Dokumentations-Websites profitieren von tieferem Crawling")
-                    else:
-                        st.caption("🌐 Standard Website-Crawling")
-                        
-                elif detected_method.method == "sitemap":
-                    max_depth = 1
-                    st.info("🗺️ Sitemap-Crawling: Tiefe automatisch auf 1 gesetzt")
-                    
-                else:  # single
-                    max_depth = 1
-                    st.info("📄 Einzelseite: Keine Tiefe erforderlich")
-            
-            with col4:
-                if detected_method.method == "sitemap":
-                    max_pages = None
-                    st.metric("Seiten-Limit", "Automatisch", help="Alle URLs aus der Sitemap")
-                    
-                elif detected_method.method == "single":
-                    max_pages = 1
-                    st.metric("Seiten-Anzahl", "1", help="Nur die angegebene Seite")
-                    
-                else:
-                    # Website/Documentation Crawling (Default auf 1)
-                    max_pages = st.number_input(
-                        "Maximale Seitenzahl:",
-                        min_value=1, max_value=100, 
-                        value=1,  # Immer Default 1
-                        help="Maximale Anzahl zu crawlender Seiten"
-                    )
-                    
-                    # Dynamische Empfehlungen
-                    if detected_method.method == "documentation":
-                        st.caption("📚 Dokumentations-Sites: Höhere Limits empfohlen")
-                    else:
-                        st.caption("🌐 Standard-Limits für Website-Crawling")
-            
-            # Warnung bei hohen Werten
-            if detected_method.method in ["website", "documentation"] and (max_depth > 3 or (max_pages and max_pages > 50)):
-                st.warning("⚠️ Hohe Werte können zu langen Ladezeiten führen!")
-                
-        else:
-            # Fallback wenn keine URL eingegeben - keine Hinweise mehr
-            max_depth = 1  # Default auf 1
-            max_pages = 1   # Default auf 1
+        with col3:
+            max_depth = st.slider(
+                "Crawling-Tiefe:",
+                min_value=1, max_value=4, value=1,
+                help="Wie tief sollen Links verfolgt werden?"
+            )
+            st.caption("🔍 Bestimmt, wie viele Link-Ebenen von der Startseite aus verfolgt werden")
         
-        # Erweiterte Einstellungen
-        with st.expander("🔧 Erweiterte Einstellungen"):
-            col5, col6 = st.columns(2)
-            
-            with col5:
-                chunk_size = st.slider(
-                    "Text-Chunk-Größe:",
-                    min_value=500, max_value=2500, value=1200,
-                    help="Kleinere Chunks = präzisere Antworten, Größere = mehr Kontext pro Antwort"
-                )
-                
-                # Chunk-Größe Empfehlung
-                if chunk_size < 800:
-                    st.info("📝 Kleine Chunks: Sehr präzise, aber möglicherweise wenig Kontext")
-                elif chunk_size > 1800:
-                    st.info("📚 Große Chunks: Viel Kontext, aber möglicherweise weniger präzise")
-                else:
-                    st.success("✅ Optimale Chunk-Größe für die meisten Anwendungen")
-            
-            with col6:
-                auto_reduce = st.checkbox(
-                    "Automatische Optimierung",
-                    value=True,
-                    help="Reduziert automatisch die Datenmenge bei Memory-Problemen"
-                )
-                
-                max_concurrent = st.slider(
-                    "Parallele Prozesse:",
-                    min_value=1, max_value=10, value=2,
-                    help="Mehr Prozesse = schneller, aber höhere Serverlast"
-                )
+        with col4:
+            max_pages = st.number_input(
+                "Maximale Seitenzahl:",
+                min_value=1, max_value=100, 
+                value=1,
+                help="Maximale Anzahl zu crawlender Seiten"
+            )
+            st.caption("🔢 Bestimmt die maximale Anzahl der Seiten, die gecrawlt und verarbeitet werden")
         
-        # Intelligente Zeitschätzung basierend auf erkanntem Typ
-        if detected_method:
-            if detected_method.method == "sitemap":
-                st.info("⏱️ Geschätzte Dauer: Abhängig von der Anzahl der URLs in der Sitemap")
-            elif detected_method.method == "single":
-                st.info("⏱️ Geschätzte Dauer: ~5-10 Sekunden für eine Seite")
-            elif detected_method.method in ["website", "documentation"] and max_pages:
-                if max_depth > 1:
-                    estimated_pages = min(max_pages, 10 ** (max_depth - 1) * 3)
-                    estimated_time = estimated_pages * 2
-                    st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für ca. {estimated_pages} Seiten")
-                else:
-                    estimated_time = max_pages * 2
-                    st.info(f"⏱️ Geschätzte Dauer: ~{estimated_time} Sekunden für {max_pages} Seite(n)")
+        # Erweiterte Einstellungen - für Demo ausgeblendet, feste Werte
+        chunk_size = 1200  # Fester Wert
+        auto_reduce = True  # Fester Wert
+        max_concurrent = 2  # Fester Wert
+        
+        # Demo-Zeitschätzung mit allgemeinen Hinweisen
+        st.info("⏱️ **Demo-Hinweise:** Bis zu 20 Seiten dauern ca. 5 Minuten. Ab 20 Seiten erhöht sich die Dauer deutlich!!!")
         
         # Form submission with enhanced validation
         submitted = st.form_submit_button("🚀 Wissensdatenbank erstellen", use_container_width=True)
@@ -447,7 +364,7 @@ def create_knowledge_base(crawler_client, chroma_client):
                 st.session_state.processing = True
                 
                 # Proceed with knowledge base creation
-                create_knowledge_base_process(url, name, detected_method, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
+                create_knowledge_base_process(url, name, None, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth, max_concurrent)
 
 def create_knowledge_base_process(url, name, detected_method, max_pages, chunk_size, auto_reduce, crawler_client, chroma_client, max_depth=2, max_concurrent=5):
     """Prozess der Wissensdatenbank-Erstellung."""
